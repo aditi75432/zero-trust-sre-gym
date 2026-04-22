@@ -266,9 +266,13 @@ class ZeroTrustEnv:
     
     def _handle_siem_query(self, action: Action) -> tuple[float, str]:
         target = action.payload.get("node", "").strip()
-        self.siem_queried_nodes.add(target)
+        
+        # 1. CHECK IF ALREADY QUERIED FIRST
         if target in self.siem_queried_nodes:
             return -8.0, "You already investigated this node. Move to another alert."
+            
+        # 2. THEN ADD IT TO THE SET
+        self.siem_queried_nodes.add(target)
         
         if target in self._remaining_compromised:
             # Build SIEM evidence from template
