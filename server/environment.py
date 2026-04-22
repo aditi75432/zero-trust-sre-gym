@@ -281,21 +281,13 @@ class ZeroTrustEnv:
             ip = self.threat_ips[idx] if idx < len(self.threat_ips) else "10.0.5.42"
             role = self.iam_roles[idx] if idx < len(self.iam_roles) else "svc-account"
             
-            # --- THE FIX: BULLETPROOF SAFE FORMATTING ---
-            class SafeDict(dict):
-                def __missing__(self, key):
-                    return "{" + key + "}" # Ignore unknown variables instead of crashing
-                    
-            safe_kwargs = SafeDict(
-                node=target, 
-                ip=ip, 
-                role=role, 
-                timestamp=self._fake_timestamp(),
-                time=self._fake_timestamp(),
-                user="service-account"
-            )
-            evidence = self.siem_evidence_template.format_map(safe_kwargs)
-            # ---------------------------------------------
+            # --- THE FIX: 100% BULLETPROOF STRING REPLACEMENT ---
+            # Bypasses Python's .format() engine entirely so LLM JSON hallucinations don't crash the server.
+            evidence = self.siem_evidence_template
+            evidence = evidence.replace("{ip}", ip).replace("{IP}", ip)
+            evidence = evidence.replace("{role}", role).replace("{ROLE}", role)
+            evidence = evidence.replace("{node}", target).replace("{NODE}", target)
+            # ----------------------------------------------------
             
             full_evidence = (
                 f"[DATADOG SEC_ALERT] {target} :: {evidence}\n"
