@@ -1,0 +1,21 @@
+[project]
+name = "cloudsec-sre-env"
+version = "1.0.0"
+description = "Autonomous Zero-Trust SRE Agent Environment"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openenv",     
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "openai",
+    "pyyaml"
+]
+
+[project.scripts]
+server = "server.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
