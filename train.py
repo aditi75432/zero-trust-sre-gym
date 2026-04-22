@@ -556,53 +556,88 @@ def main():
     print(f"[Train] Model loaded on {next(model.parameters()).device}")
 
     # ── SFT warm-start (optional but strongly recommended) ──
-    # If sft_data was provided, fine-tune on expert demonstrations first.
-    # This teaches the model the JSON format and workflow sequence so that
-    # GRPO starts from a competent base rather than random exploration.
-    # The SFT phase is short (1 epoch) — we just want format + sequence,
-    # not to overfit on the demonstrations.
+    # This runs ONE epoch on expert demonstrations so the model learns:
+    #   1. The exact JSON format the environment expects
+    #   2. The 4-step workflow sequence (query -> ticket -> approval -> isolate)
+    #   3. What a forensically-specific justification looks like
+    #
+    # Memory fixes for T4 (15GB VRAM):
+    #   - gradient_checkpointing: trades compute for ~30% VRAM reduction
+    #   - dynamic padding: pads only to the longest sample in each batch,
+    #     NOT to max_length=2048 — this was the direct cause of the OOM crash
+    #   - per_device_train_batch_size=1 with gradient_accumulation_steps=4
+    #
+    # Label masking: labels=-100 for system/user turns so the model only
+    # learns to predict its own JSON outputs, not the observation text.
     if args.sft_data and os.path.exists(args.sft_data):
         print(f"\n[Train] SFT warm-start from {args.sft_data}...")
         import json as _json
-        from transformers import TrainingArguments, Trainer, DataCollatorForLanguageModeling
+        from transformers import TrainingArguments, Trainer
 
         with open(args.sft_data, "r") as f:
             sft_raw = _json.load(f)
 
         print(f"[Train] Loaded {len(sft_raw)} expert episodes for SFT.")
 
-        # Flatten multi-turn conversations into single training strings
-        def flatten_episode(episode):
-            parts = []
+        IGNORE_INDEX = -100
+
+        def build_sft_sample(episode: dict) -> dict:
+            input_ids = []
+            labels = []
             for msg in episode.get("messages", []):
                 role = msg["role"]
                 content = msg["content"]
                 if role == "system":
-                    parts.append(f"<|system|>\n{content}")
+                    text = f"<|system|>\n{content}\n"
+                    toks = tokenizer.encode(text, add_special_tokens=False)
+                    input_ids.extend(toks)
+                    labels.extend([IGNORE_INDEX] * len(toks))
                 elif role == "user":
-                    parts.append(f"<|user|>\n{content}")
+                    text = f"<|user|>\n{content}\n"
+                    toks = tokenizer.encode(text, add_special_tokens=False)
+                    input_ids.extend(toks)
+                    labels.extend([IGNORE_INDEX] * len(toks))
                 elif role == "assistant":
-                    parts.append(f"<|assistant|>\n{content}")
-            return "\n".join(parts) + tokenizer.eos_token
-
-        sft_texts = [flatten_episode(ep) for ep in sft_raw]
-        sft_encodings = tokenizer(
-            sft_texts,
-            truncation=True,
-            max_length=2048,
-            padding="max_length",
-            return_tensors="pt"
-        )
+                    # Only the assistant turns contribute to the loss
+                    text = f"<|assistant|>\n{content}\n"
+                    toks = tokenizer.encode(text, add_special_tokens=False)
+                    input_ids.extend(toks)
+                    labels.extend(toks)
+            input_ids.append(tokenizer.eos_token_id)
+            labels.append(tokenizer.eos_token_id)
+            # Truncate to 1536 — safe for T4 with gradient checkpointing
+            max_len = 1536
+            return {"input_ids": input_ids[:max_len], "labels": labels[:max_len]}
 
         class SFTDataset(torch.utils.data.Dataset):
-            def __init__(self, encodings):
-                self.encodings = encodings
+            def __init__(self, samples):
+                self.samples = samples
             def __len__(self):
-                return len(self.encodings["input_ids"])
+                return len(self.samples)
             def __getitem__(self, idx):
-                return {k: v[idx] for k, v in self.encodings.items()}
+                return self.samples[idx]
 
-        sft_dataset = SFTDataset(sft_encodings)
+        def sft_collate(batch):
+            # Dynamic padding — only pads to the longest sample in this batch
+            # This is the critical fix for the OOM crash on T4
+            max_len = max(len(s["input_ids"]) for s in batch)
+            padded_ids, padded_labels, attn_masks = [], [], []
+            for s in batch:
+                pad_len = max_len - len(s["input_ids"])
+                padded_ids.append(s["input_ids"] + [tokenizer.pad_token_id] * pad_len)
+                padded_labels.append(s["labels"] + [IGNORE_INDEX] * pad_len)
+                attn_masks.append([1] * len(s["input_ids"]) + [0] * pad_len)
+            return {
+                "input_ids": torch.tensor(padded_ids, dtype=torch.long),
+                "labels": torch.tensor(padded_labels, dtype=torch.long),
+                "attention_mask": torch.tensor(attn_masks, dtype=torch.long),
+            }
+
+        sft_samples = [build_sft_sample(ep) for ep in sft_raw]
+        sft_dataset = SFTDataset(sft_samples)
+
+        # Gradient checkpointing reduces peak VRAM usage — critical for T4
+        model.gradient_checkpointing_enable()
 
         sft_args = TrainingArguments(
             output_dir=args.output_dir + "-sft",
@@ -612,23 +647,35 @@ def main():
             learning_rate=2e-5,
             warmup_steps=5,
             logging_steps=5,
-            save_steps=50,
+            save_steps=999,
             report_to="none",
             bf16=torch.cuda.is_available(),
             fp16=False,
+            dataloader_num_workers=0,
+            remove_unused_columns=False,
         )
 
         sft_trainer = Trainer(
             model=model,
             args=sft_args,
             train_dataset=sft_dataset,
-            data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            data_collator=sft_collate,
         )
 
         sft_trainer.train()
+
+        # Disable gradient checkpointing after SFT — GRPO manages its own memory
+        model.gradient_checkpointing_disable()
+
+        # Free SFT optimizer states before GRPO starts
+        import gc as _gc
+        del sft_trainer
+        _gc.collect()
+        torch.cuda.empty_cache()
+
         print("[Train] SFT warm-start complete. Proceeding to GRPO.")
         print("[Train] The model now knows the JSON format and 4-step workflow.")
-        print("[Train] GRPO will refine the judgment: which node, how specific to be.")
+        print("[Train] GRPO will refine judgment: which node, how specific the evidence needs to be.")
     elif args.sft_data:
         print(f"[Train] SFT data path '{args.sft_data}' not found — skipping warm-start.")
 
