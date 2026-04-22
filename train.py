@@ -336,8 +336,12 @@ def main():
     dataset = collect_training_prompts(n_prompts=args.dataset_size)
     
     # Build reward function
-    reward_fn = ZeroTrustRewardFunction(BASE_URL)
-    
+    # Build reward function object
+    reward_obj = ZeroTrustRewardFunction(BASE_URL)
+
+# Wrap it in a standard Python function so TRL can read its __name__
+    def zero_trust_reward(completions, **kwargs):
+        return reward_obj(completions, **kwargs)
     # GRPO config
     # Key settings that fix the zero-loss problem:
     #   num_generations=8: 8 rollouts per prompt → variance in group
@@ -352,11 +356,12 @@ def main():
         warmup_steps=5,
         
         # These two settings are the zero-loss fix
-        num_generations=args.num_generations,   # KEY: multiple rollouts per prompt
+        num_generations=args.num_generations, 
+        generation_batch_size=args.num_generations,  # KEY: multiple rollouts per prompt
         temperature=0.7,                         # KEY: variation between rollouts
         
-        max_new_tokens=120,
-        max_prompt_length=1024,
+        max_completion_length=120,
+     
         
         logging_steps=1,
         save_steps=10,
@@ -371,7 +376,7 @@ def main():
     trainer = GRPOTrainer(
         model=model,
         args=training_args,
-        reward_funcs=reward_fn,
+        reward_funcs=[zero_trust_reward],
         train_dataset=dataset,
         processing_class=tokenizer
     )

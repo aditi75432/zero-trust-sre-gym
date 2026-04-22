@@ -212,21 +212,21 @@ def main():
                        help="Number of evaluation episodes")
     args = parser.parse_args()
     
-    print("\n🛡️  Zero Trust SRE Gym — Inference Evaluation")
+    print("\nZero Trust SRE Gym — Inference Evaluation")
     print("=" * 60)
     
     # Check server
     try:
         resp = requests.get(args.base_url, timeout=3)
         assert resp.status_code == 200
-        print(f"✅ Environment server connected.")
+        print(f"Environment server connected.")
     except Exception:
-        print(f"❌ Cannot connect to {args.base_url}")
+        print(f"Cannot connect to {args.base_url}")
         return
     
     # Load tuned model
     if not os.path.exists(args.model_path):
-        print(f"❌ Model not found at {args.model_path}")
+        print(f"Model not found at {args.model_path}")
         print("   Run train.py first to generate the checkpoint.")
         return
     
