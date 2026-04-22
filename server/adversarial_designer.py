@@ -16,7 +16,25 @@ doesn't hard-fail on API issues.
 """
 
 import random
+import requests
 from .llm_client import call_llm_json
+
+def fetch_live_threat_intel() -> str:
+    """Fetches a real, recent High/Critical CVE from public threat feeds."""
+    try:
+        # Using a public CVE feed (no API key required)
+        r = requests.get("https://cve.circl.lu/api/last", timeout=5)
+        if r.status_code == 200:
+            cves = r.json()
+            # Find a recent critical vulnerability
+            for cve in cves:
+                if cve.get('cvss', 0) >= 7.5:
+                    return f"Real Threat Intel: {cve['id']} - {cve['summary']}"
+    except Exception as e:
+        print(f"Threat intel feed offline, using fallback zero-day. {e}")
+    
+    # Fallback to a notorious zero-day if the conference WiFi blocks the API
+    return "Real Threat Intel: CVE-2024-3400 (Palo Alto PAN-OS Command Injection allowing unauthenticated RCE)."
 
 
 # Nodes available in the Zero Trust topology
@@ -99,44 +117,29 @@ def generate_scenario(weakness_profile: dict, difficulty: str = "intermediate") 
 
 
 def _llm_generate(weakness_profile: dict, difficulty: str) -> dict:
-    """
-    Asks Groq to design a scenario that targets the agent's weaknesses.
-    The model has full creative latitude within the topology constraints.
-    """
-    # Find what the agent struggles with most
-    top_weaknesses = sorted(
-        weakness_profile.items(), key=lambda x: x[1], reverse=True
-    )[:2]
+    top_weaknesses = sorted(weakness_profile.items(), key=lambda x: x[1], reverse=True)[:2]
     weakness_focus = ", ".join(f"{k} (failure rate: {v:.0%})" for k, v in top_weaknesses) or "any threat type"
     
     is_multi_fault = difficulty in ["advanced", "expert"]
     node_count = 2 if is_multi_fault else 1
     
-    prompt = f"""You are a Red Team adversarial scenario designer for a Zero Trust enterprise security training system.
+    live_cve_context = fetch_live_threat_intel() # <-- FETCH THE REAL DATA
+    
+    prompt = f"""You are a Red Team adversarial scenario designer for a Zero Trust enterprise security system.
 
 System topology:
 - Nodes: api_gateway, auth_service, frontend, payment, hr_db
-- IMPORTANT: api_gateway and auth_service can NEVER be compromised (they are red herrings only)
-- Only these can be compromised: frontend, payment, hr_db
+- Red herrings: api_gateway, auth_service (NEVER compromised)
+- Vulnerable targets: frontend, payment, hr_db
 
-Agent weakness profile (higher = agent fails at this):
-{weakness_profile}
-Focus areas: {weakness_focus}
+Agent weaknesses: {weakness_focus}
+Difficulty: {difficulty} ({node_count} nodes compromised)
 
-Configuration:
-- Difficulty: {difficulty}
-- Number of compromised nodes: {node_count}
-- Multi-fault: {is_multi_fault}
+CRITICAL REAL-WORLD INJECTION:
+You MUST base the SIEM evidence on this exact live vulnerability:
+>>> {live_cve_context} <<<
 
-Design a realistic enterprise security incident. Requirements:
-1. compromised_nodes: list of {node_count} node(s) from [frontend, payment, hr_db] ONLY
-2. threat_ips: one internal IP per compromised node (10.0.x.x format)  
-3. iam_roles: one realistic service account name per compromised node
-4. red_herring_nodes: 1-2 nodes that will have misleading WARNING alerts (must differ from compromised)
-5. siem_evidence_template: what SIEM shows when agent queries the compromised node. Use {{ip}} and {{role}} as placeholders.
-6. threat_type: one of data_exfiltration, lateral_movement, privilege_escalation, supply_chain
-
-Make it target the agent's weaknesses. Be creative with the attack narrative.
+Translate the mechanics of that specific CVE into realistic Datadog/Splunk SIEM logs for the compromised node.
 
 Respond ONLY with valid JSON, no surrounding text:
 {{
@@ -145,8 +148,8 @@ Respond ONLY with valid JSON, no surrounding text:
   "threat_ips": ["10.0.x.x"],
   "iam_roles": ["role-name-svc"],
   "red_herring_nodes": ["node"],
-  "siem_evidence_template": "Evidence text with {{ip}} and {{role}} placeholders",
-  "difficulty_description": "One sentence describing what makes this scenario challenging"
+  "siem_evidence_template": "Log evidence matching the CVE mechanics. Use {{ip}} and {{role}}.",
+  "difficulty_description": "One sentence describing the CVE and attack vector"
 }}"""
 
     return call_llm_json(prompt, temperature=0.7, model="llama-3.1-8b-instant")

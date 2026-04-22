@@ -73,6 +73,7 @@ class ZeroTrustEnv:
         self.episode_reward: float = 0.0
         self.last_siem_output: str = ""    # Judge needs this for ticket evaluation
         self.siem_queried_nodes: set = set()
+        self.recent_action_strings: list = []
         
         # ── Build the service topology ──
         self.nodes = {
@@ -138,7 +139,7 @@ class ZeroTrustEnv:
                 alert_id=f"SEC-{random.randint(10, 99):02d}",
                 severity="FATAL",
                 target_node=node,
-                symptom="Anomalous outbound data transfer detected. IAM access pattern outside baseline."
+                symptom = f"CRITICAL: Suspicious outbound traffic detected from {node}. IAM role anomaly observed. Investigate immediately."
             ))
         
         # Red herring alerts (WARNING not FATAL — agent should learn to distinguish)
@@ -182,7 +183,23 @@ class ZeroTrustEnv:
         if self.done:
             return self.state, Reward(value=0.0, message="Episode already complete. Call /reset."), True, {}
         
+
+        
         self.steps += 1
+        reward_val = -0.3   # Base step cost
+        message = ""
+        
+        # --- NEW ANTI-LOOPING PENALTY ---
+        action_str = f"{action.tool_name}:{action.payload.get('node', '')}"
+        if action_str in self.recent_action_strings[-3:]: # If done in the last 3 steps
+            reward_val -= 10.0
+            message = f"REPETITION PENALTY: You just tried {action_str}. Stop guessing blindly."
+            self.state.command_output = message
+            self.episode_reward += reward_val
+            return self.state, Reward(value=reward_val, message=message), False, {}
+        
+        self.recent_action_strings.append(action_str)
+        # --------------------------------
         reward_val = -0.3   # Base step cost — encourages efficiency
         message = ""
         
@@ -250,6 +267,8 @@ class ZeroTrustEnv:
     def _handle_siem_query(self, action: Action) -> tuple[float, str]:
         target = action.payload.get("node", "").strip()
         self.siem_queried_nodes.add(target)
+        if target in self.siem_queried_nodes:
+            return -8.0, "You already investigated this node. Move to another alert."
         
         if target in self._remaining_compromised:
             # Build SIEM evidence from template
@@ -260,32 +279,31 @@ class ZeroTrustEnv:
             evidence = self.siem_evidence_template.format(
                 node=target, ip=ip, role=role
             )
-            # Add specifics in case template didn't include them
             full_evidence = (
-                f"[FATAL] {target}: {evidence} "
-                f"| Source IP: {ip} "
-                f"| IAM Role assumed: {role} "
-                f"| Bytes transferred: {random.randint(50, 500)}MB "
+                f"[DATADOG SEC_ALERT] {target} :: {evidence}\n"
+                f"| Source IP: {ip} | IAM Role: {role} \n"
+                f"| Correlation ID: {random.randint(100000, 999999)}\n"
                 f"| Timestamp: {self._fake_timestamp()}"
             )
             
             self.last_siem_output = full_evidence
             self.state.command_output = full_evidence
-            return +3.0, f"Critical forensic evidence found on {target}."
+            # MASSIVE POSITIVE REWARD FOR CORRECT INVESTIGATION
+            return +10.0, f"CRITICAL: Found live threat on {target}. Excellent investigation."
         
         elif target in self.red_herring_nodes:
             self.state.command_output = (
                 f"[INFO] {target}: CPU utilization spike (82%) from batch job 'marketing-analytics-nightly'. "
                 f"No anomalous IAM activity. No external network connections outside policy. False positive."
             )
-            return -1.5, f"False positive investigated on {target}. Wasted a step."
+            return -2.0, f"False positive on {target}. Wasted a step."
         
         elif target in self.nodes:
             self.state.command_output = (
                 f"[INFO] {target}: Operating within normal parameters. "
                 f"No suspicious IAM events. No anomalous outbound traffic in last 30 minutes."
             )
-            return -1.0, f"Clean node queried. No relevant evidence found."
+            return -5.0, f"Clean node queried. Why are you looking here? Check the alerts." # <--- STRONGER PENALTY
         
         else:
             self.state.command_output = f"Error: Node '{target}' not found in service registry."

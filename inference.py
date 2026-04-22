@@ -18,6 +18,7 @@ import time
 import argparse
 import requests
 import torch
+import random
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
@@ -71,7 +72,9 @@ def parse_action(text: str) -> dict:
     
     # Keyword fallback
     tool = "query_siem_logs"
-    node = "hr_db"
+    
+
+    node = random.choice(["frontend", "payment", "hr_db"])
     for n in ["api_gateway", "auth_service", "frontend", "payment", "hr_db"]:
         if n in text.lower():
             node = n
@@ -148,7 +151,7 @@ def run_episode(
         with torch.no_grad():
             output = model.generate(
                 **inputs,
-                max_new_tokens=100,
+                max_new_tokens=250,  # was 100 — too short for JSON with justification
                 do_sample=True,
                 temperature=0.3,
                 top_p=0.9,
@@ -207,7 +210,7 @@ def main():
                        help="Path to fine-tuned model checkpoint")
     parser.add_argument("--base-model", default=None,
                        help="Base model name for comparison (optional)")
-    parser.add_argument("--base-url", default="http://localhost:7860")
+    parser.add_argument("--base-url", default="https://aditi75432-zero-trust-safe-SRE-gym.hf.space")
     parser.add_argument("--episodes", type=int, default=5,
                        help="Number of evaluation episodes")
     args = parser.parse_args()
