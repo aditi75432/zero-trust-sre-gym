@@ -1,15 +1,101 @@
-version: "1.0"
-name: "cloudsec-sre-env"
-description: "Autonomous Zero-Trust SRE Agent Environment. Simulates a microservices architecture under attack where the agent must investigate alerts, contain threats, and fix access policies without taking down production."
+spec_version: 1
+name: zero-trust-sre-gym
+type: space
+runtime: fastapi
+app: server.app:app
+port: 7860
+
+description: >
+  Zero Trust SRE Gym: An RL environment where a language model agent learns to 
+  diagnose and contain enterprise security incidents through strict compliance workflows.
+  
+  The agent must navigate a real Zero Trust policy enforcement layer: investigate
+  SIEM telemetry, file forensically-justified change tickets, get change board approval,
+  then isolate the compromised node. Attempting isolation without an approved ticket
+  triggers a -50 penalty and episode termination.
+  
+  Features: adversarial LLM scenario generation (Groq), 3-persona compliance judge
+  (Junior/Senior/Principal), automatic curriculum controller, cascading failure simulation.
+
 author: "Aditi Mehta"
+tags:
+  - zero-trust
+  - security
+  - sre
+  - enterprise
+  - compliance
+  - curriculum-learning
+  - adversarial
+
+observation_space:
+  type: dict
+  fields:
+    active_alerts:
+      type: list
+      description: "Security alerts with severity (FATAL/WARNING), target node, and symptom text"
+    command_output:
+      type: string
+      description: "Result of last tool execution — SIEM logs, ticket status, approval response"
+    global_uptime:
+      type: float
+      range: [0.0, 100.0]
+      description: "Current production health. Isolating wrong nodes triggers cascading failures"
+    active_ticket_id:
+      type: string
+      nullable: true
+      description: "Current ITIL change ticket ID if ticket has been filed and approved"
+    ticket_approved:
+      type: boolean
+      description: "Whether change board has authorized the isolation action"
+    difficulty:
+      type: string
+      values: [warmup, beginner, intermediate, advanced, expert]
+    judge_persona:
+      type: string
+      values: [junior, senior, principal]
+
+action_space:
+  type: dict
+  fields:
+    tool_name:
+      type: string
+      values: [query_siem_logs, file_ticket, check_approval, isolate_node]
+    payload:
+      type: dict
+      description: "Tool arguments. node for most tools, ticket_id for check_approval"
+    justification:
+      type: string
+      description: "Agent's reasoning. Evaluated by LLM judge on file_ticket calls"
+
+reward:
+  min: -50.0
+  max: 35.0
+  structure:
+    query_siem_logs_correct: +3.0
+    query_siem_logs_red_herring: -1.5
+    query_siem_logs_clean: -1.0
+    file_ticket_llm_judge: "judge_score * 5.0  (range: -5.0 to +5.0)"
+    file_ticket_no_investigation: -3.0
+    check_approval: +2.0
+    isolate_correct_uptime_ok: "+20.0 + phase_score*8.0 + efficiency_bonus (max ~35)"
+    isolate_correct_uptime_low: -12.0
+    isolate_wrong_node: -25.0
+    isolate_no_ticket: -50.0
+    sla_breach: -15.0
+    base_step_cost: -0.3
+
 tasks:
-  - id: "easy_brute_force"
-    difficulty: "easy"
-    description: "Analyze the SIEM alert and block the specific external IP causing a high volume of failed login attempts."
-  - id: "medium_lateral_movement"
-    difficulty: "medium"
-    description: "Identify and isolate the compromised frontend pod attempting unauthorized lateral queries to the internal HR database."
-  - id: "hard_insider_threat"
-    difficulty: "hard"
-    description: "Detect the anomalous data exfiltration, identify the compromised IAM role, and revoke it while maintaining 99% service uptime for legitimate traffic."
-entrypoint: "server.environment:CloudSecEnv"
+  - id: auto
+    description: "Curriculum-controlled. Starts at warmup, escalates as agent improves."
+  - id: warmup_single_fault
+    difficulty: warmup
+    description: "Single compromised node. SLA: 15 steps. Judge: junior."
+  - id: intermediate_redherring
+    difficulty: intermediate
+    description: "Node with red herring alerts. Agent must distinguish signal from noise. SLA: 11 steps."
+  - id: advanced_multifault
+    difficulty: advanced
+    description: "Two simultaneous compromises. Both must be isolated. SLA: 9 steps."
+  - id: expert_adversarial
+    difficulty: expert
+    description: "LLM-designed scenario targeting agent weaknesses. SLA: 7 steps. Judge: principal."
