@@ -264,6 +264,7 @@ class ZeroTrustEnv:
     
     # ─── TOOL HANDLERS ───────────────────────────────────────────────────────
     
+    
     def _handle_siem_query(self, action: Action) -> tuple[float, str]:
         target = action.payload.get("node", "").strip()
         
@@ -280,9 +281,22 @@ class ZeroTrustEnv:
             ip = self.threat_ips[idx] if idx < len(self.threat_ips) else "10.0.5.42"
             role = self.iam_roles[idx] if idx < len(self.iam_roles) else "svc-account"
             
-            evidence = self.siem_evidence_template.format(
-                node=target, ip=ip, role=role
+            # --- THE FIX: BULLETPROOF SAFE FORMATTING ---
+            class SafeDict(dict):
+                def __missing__(self, key):
+                    return "{" + key + "}" # Ignore unknown variables instead of crashing
+                    
+            safe_kwargs = SafeDict(
+                node=target, 
+                ip=ip, 
+                role=role, 
+                timestamp=self._fake_timestamp(),
+                time=self._fake_timestamp(),
+                user="service-account"
             )
+            evidence = self.siem_evidence_template.format_map(safe_kwargs)
+            # ---------------------------------------------
+            
             full_evidence = (
                 f"[DATADOG SEC_ALERT] {target} :: {evidence}\n"
                 f"| Source IP: {ip} | IAM Role: {role} \n"
@@ -300,14 +314,14 @@ class ZeroTrustEnv:
                 f"[INFO] {target}: CPU utilization spike (82%) from batch job 'marketing-analytics-nightly'. "
                 f"No anomalous IAM activity. No external network connections outside policy. False positive."
             )
-            return -2.0, f"False positive on {target}. Wasted a step."
+            return -2.0, f"False positive investigated on {target}. Wasted a step."
         
         elif target in self.nodes:
             self.state.command_output = (
                 f"[INFO] {target}: Operating within normal parameters. "
                 f"No suspicious IAM events. No anomalous outbound traffic in last 30 minutes."
             )
-            return -5.0, f"Clean node queried. Why are you looking here? Check the alerts." # <--- STRONGER PENALTY
+            return -5.0, f"Clean node queried. Why are you looking here? Check the alerts."
         
         else:
             self.state.command_output = f"Error: Node '{target}' not found in service registry."
