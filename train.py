@@ -251,7 +251,7 @@ class ZeroTrustEpisodeReward:
 
     def _step(self, action: dict) -> tuple:
         try:
-            resp = requests.post(f"{self.base_url}/step", json=action, timeout=15)
+            resp = requests.post(f"{self.base_url}/step", json=action, timeout=20)
             if resp.status_code == 200:
                 data = resp.json()
                 return data["observation"], float(data["reward"]["value"]), data["done"]
@@ -419,7 +419,7 @@ class ZeroTrustStepReward:
                 format_bonus = -0.5
 
             try:
-                resp = requests.post(f"{self.base_url}/step", json=action, timeout=15)
+                resp = requests.post(f"{self.base_url}/step", json=action, timeout=30)
 
                 if resp.status_code == 200:
                     data = resp.json()

@@ -76,7 +76,7 @@ def detect_node_from_logs(text: str) -> str:
 
 def run_episode():
     try:
-        r = requests.post(f"{BASE_URL}/reset", json={"task_id": "auto"}, timeout=10)
+        r = requests.post(f"{BASE_URL}/reset", json={"task_id": "auto"}, timeout=45)
         if r.status_code != 200:
             return None
 
@@ -108,7 +108,7 @@ def run_episode():
 
             messages.append({"role": "assistant", "content": format_action(action)})
 
-            r = requests.post(f"{BASE_URL}/step", json=action, timeout=20)
+            r = requests.post(f"{BASE_URL}/step", json=action, timeout=45)
             if r.status_code != 200:
                 return None
 
@@ -142,7 +142,7 @@ def run_episode():
 
             messages.append({"role": "assistant", "content": format_action(action)})
 
-            r = requests.post(f"{BASE_URL}/step", json=action, timeout=20)
+            r = requests.post(f"{BASE_URL}/step", json=action, timeout=45)
             if r.status_code != 200:
                 return None
 
@@ -167,7 +167,7 @@ def run_episode():
 
             messages.append({"role": "assistant", "content": format_action(action)})
 
-            r = requests.post(f"{BASE_URL}/step", json=action, timeout=20)
+            r = requests.post(f"{BASE_URL}/step", json=action, timeout=45)
             if r.status_code != 200:
                 return None
 
@@ -191,7 +191,7 @@ def run_episode():
 
             messages.append({"role": "assistant", "content": format_action(action)})
 
-            r = requests.post(f"{BASE_URL}/step", json=action, timeout=20)
+            r = requests.post(f"{BASE_URL}/step", json=action, timeout=45)
             if r.status_code != 200:
                 return None
 
@@ -214,7 +214,7 @@ def run_episode():
 
 def generate_dataset(n, output):
     try:
-        r = requests.get(BASE_URL, timeout=5)
+        r = requests.get(BASE_URL, timeout=10)
         if r.status_code != 200:
             print("Environment not reachable")
             return
@@ -228,7 +228,7 @@ def generate_dataset(n, output):
     for _ in tqdm(range(n)):
         ep = run_episode()
 
-        if ep and ep["total_reward"] > 5:
+        if ep and ep["total_reward"] > -5:
             results.append(ep)
         else:
             failed += 1
