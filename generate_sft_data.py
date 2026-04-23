@@ -91,7 +91,15 @@ def run_episode():
         step = 0
         done = False
 
-        nodes = ["hr_db", "payment", "frontend"]
+        alerts = obs.get("active_alerts", [])
+
+        priority_nodes = [
+            a["target_node"]
+            for a in alerts
+            if a.get("severity") == "FATAL"
+        ]
+
+        nodes = list(dict.fromkeys(priority_nodes + ["hr_db", "payment", "frontend"]))
         evidence_map = {}
 
         for node in nodes:
@@ -119,7 +127,7 @@ def run_episode():
 
             messages.append({"role": "user", "content": format_observation(obs, step)})
 
-            if data["reward"]["value"] > 0:
+            if data["reward"]["value"] > 0 or "suspicious" in obs.get("command_output", "").lower():
                 evidence_map[node] = obs.get("command_output", "")
 
         if not evidence_map:
@@ -135,7 +143,10 @@ def run_episode():
                 "tool_name": "file_ticket",
                 "payload": {
                     "node": node,
-                    "justification": f"SIEM evidence: {evidence[:200]}"
+                    "justification": (
+    f"SIEM logs confirm compromise on {node}. "
+    f"Indicators observed: {evidence[:180]}"
+)
                 },
                 "justification": "Submitting forensic evidence"
             }
