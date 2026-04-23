@@ -1,47 +1,3 @@
-"""
-train.py — GRPO Training for Zero Trust SRE Gym.
-
-What was broken in the previous version and why training never converged:
-
-1. max_completion_length=120 was too short.
-   Nearly every completion hit the ceiling (clipped_ratio: 1.0 in logs).
-   A JSON like {"tool_name": "query_siem_logs", "payload": {"node": "frontend"},
-   "justification": "..."} needs 150-200 tokens minimum. Truncated JSON
-   cannot be parsed. The fallback parser then hardcoded hr_db for every
-   completion, so ALL 8 rollouts got the same action, same reward, zero
-   advantage, zero gradient. The model never actually learned anything —
-   it was being evaluated on the parser's fallback, not its own output.
-
-2. The reward function reset the environment between EVERY completion in
-   a GRPO batch. GRPO needs all 8 completions for the same prompt to be
-   evaluated against the same initial state so it can compute relative
-   advantages. Resetting between completions means each rollout sees a
-   different scenario — advantage computation becomes meaningless noise.
-
-3. Single-step reward is a weak signal for a 4-step workflow.
-   The model has no way to learn from a single query_siem_logs call
-   whether it should follow up with a ticket or another query.
-   We need multi-step episode rollouts and the total reward.
-
-4. entropy collapsed to near-zero by step 80.
-   That is what low temperature + no reward signal does. When the model
-   can't distinguish good from bad actions, it collapses to a single
-   repeated output. Temperature needs to be high enough (0.9) during
-   training to keep exploration alive.
-
-Fixes applied:
-  - max_completion_length: 250 (fits the JSON format with justification)
-  - Reward function runs FULL EPISODE rollouts, not single steps
-  - All 8 GRPO completions evaluated against the SAME reset state
-    (we snapshot the initial obs and use a separate env per rollout)
-  - Temperature: 0.9 during rollout collection
-  - Gradient accumulation: 8 (effective batch = 64, stable for small models)
-  - Clean logging that shows reward trajectory clearly
-
-Run in Colab:
-  !python train.py --model Qwen/Qwen2.5-1.5B-Instruct --max-steps 200 --num-generations 8
-"""
-
 import os
 import re
 import json
@@ -53,6 +9,7 @@ from peft import LoraConfig, get_peft_model
 from datasets import Dataset
 from trl import GRPOConfig, GRPOTrainer
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
 
 
 BASE_URL = os.environ.get("ENV_BASE_URL", "http://localhost:7860")
@@ -109,10 +66,7 @@ def parse_args():
 # ─── ACTION PARSING ──────────────────────────────────────────────────────────
 
 def parse_action(text: str) -> dict:
-    """
-    Robust parser for model output. Handles the full range of LLM JSON messiness.
-    Returns a valid action dict no matter what the model produces.
-    """
+    
     text = text.strip()
     text = re.sub(r'```(?:json)?', '', text).strip().rstrip('`').strip()
 
@@ -172,39 +126,63 @@ def parse_action(text: str) -> dict:
 # ─── OBSERVATION FORMATTING ──────────────────────────────────────────────────
 
 def build_obs_text(obs: dict) -> str:
-    """
-    Formats the environment observation as a structured prompt section.
-    Includes the belief state (what has been investigated, what was confirmed)
-    so the model can reason about prior steps without re-reading all history.
-    """
+    
+
+    # 1. ACTIVE ALERTS
+
+    alerts = obs.get("active_alerts", [])
     alerts_text = "\n".join(
         f"  [{a['severity']}] {a['target_node']}: {a['symptom'][:100]}"
-        for a in obs.get("active_alerts", [])
-    )
+        for a in alerts
+    ) if alerts else "  None"
 
+   
+    # 2. TICKET STATUS
+    
     ticket_id = obs.get("active_ticket_id")
     ticket_approved = obs.get("ticket_approved", False)
 
-    ticket_status = "None"
     if ticket_id and ticket_approved:
         ticket_status = f"{ticket_id} (APPROVED — ready to isolate)"
     elif ticket_id:
         ticket_status = f"{ticket_id} (pending approval)"
+    else:
+        ticket_status = "None"
 
+   
+    # 3. COMMAND OUTPUT
+  
     command_out = obs.get("command_output", "Awaiting first command.")
-    # Trim long SIEM outputs but keep the crucial evidence lines
+
     if len(command_out) > 400:
         command_out = command_out[:400] + "...[truncated]"
 
+    # 4. SERVICE HEALTH (REAL WORLD SIGNAL)
+ 
+    services_text = "unavailable"
+    try:
+        svc = requests.get(f"{BASE_URL}/services", timeout=2).json()
+
+        services_text = "\n".join(
+            f"  {name}: {data['status']} (latency={data['latency_ms']}ms)"
+            for name, data in svc.items()
+        )
+    except Exception:
+        services_text = "  unavailable"
+
+  
+    # 5. FINAL STRUCTURED STATE
+ 
     return (
-        f"CURRENT STATE:\n"
-        f"Active alerts:\n{alerts_text or '  None'}\n\n"
-        f"Last command output:\n{command_out}\n\n"
-        f"Production uptime: {obs.get('global_uptime', 100.0):.1f}%\n"
-        f"Active ticket: {ticket_status}\n"
-        f"Difficulty: {obs.get('difficulty', 'warmup')}\n"
-        f"Judge persona: {obs.get('judge_persona', 'senior')}\n"
-        f"Steps used: {obs.get('episode_number', 0)}"
+        f"===== SYSTEM STATE =====\n\n"
+        f"ACTIVE ALERTS:\n{alerts_text}\n\n"
+        f"LAST COMMAND OUTPUT:\n{command_out}\n\n"
+        f"SERVICE HEALTH:\n{services_text}\n\n"
+        f"UPTIME: {obs.get('global_uptime', 100.0):.1f}%\n"
+        f"TICKET STATUS: {ticket_status}\n"
+        f"DIFFICULTY: {obs.get('difficulty', 'warmup')}\n"
+        f"JUDGE: {obs.get('judge_persona', 'senior')}\n"
+        f"STEP: {obs.get('episode_number', 0)}\n"
     )
 
 
@@ -249,30 +227,9 @@ def collect_training_prompts(n_prompts: int = 30) -> Dataset:
 
 # ─── REWARD FUNCTION ─────────────────────────────────────────────────────────
 
+
+
 class ZeroTrustEpisodeReward:
-    """
-    GRPO reward function that runs FULL EPISODE rollouts.
-
-    The fundamental problem with single-step rewards for GRPO:
-    If the model outputs query_siem_logs(frontend) and gets +10.0,
-    that's great — but from GRPO's perspective, it's comparing that
-    against 7 other completions that each ran ONE step and then stopped.
-    The model learns "query frontend good" but doesn't learn what to do next.
-
-    This reward function runs the full workflow from a given prompt forward.
-    The model generates action 1. We step the environment. Then we feed the
-    new state back and generate action 2. We repeat until done or max_episode_steps.
-    The model gets the TOTAL EPISODE REWARD. This means the model learns the
-    complete sequence: investigate → ticket → approve → isolate.
-
-    GRPO then compares: did this rollout's full sequence earn more than the
-    other 7 rollouts? That's a meaningful learning signal.
-
-    Critical: all 8 rollouts MUST start from the same environment state.
-    We snapshot the initial obs at the start of __call__ and reset between
-    each rollout to that same starting point. This is what makes the
-    advantages comparable.
-    """
 
     def __init__(self, base_url: str, model, tokenizer, max_episode_steps: int = 8):
         self.base_url = base_url
@@ -292,7 +249,7 @@ class ZeroTrustEpisodeReward:
         except Exception:
             return {}
 
-    def _step(self, action: dict) -> tuple[dict, float, bool]:
+    def _step(self, action: dict) -> tuple:
         try:
             resp = requests.post(f"{self.base_url}/step", json=action, timeout=15)
             if resp.status_code == 200:
@@ -303,7 +260,6 @@ class ZeroTrustEpisodeReward:
         return {}, -1.0, True
 
     def _generate_action(self, obs: dict) -> str:
-        """Single forward pass to get the model's next action."""
         prompt = f"{SYSTEM_PROMPT}\n\n{build_obs_text(obs)}\n\nYour action:"
 
         inputs = self.tokenizer(
@@ -319,8 +275,8 @@ class ZeroTrustEpisodeReward:
                 **inputs,
                 max_new_tokens=200,
                 do_sample=True,
-                temperature=0.9,
-                top_p=0.95,
+                temperature=0.7,
+                top_p=0.9,
                 pad_token_id=self.tokenizer.eos_token_id,
                 eos_token_id=self.tokenizer.eos_token_id
             )
@@ -329,78 +285,98 @@ class ZeroTrustEpisodeReward:
         return self.tokenizer.decode(new_tokens, skip_special_tokens=True)
 
     def __call__(self, completions: list[str], prompts: list[str] = None, **kwargs) -> list[float]:
-        """
-        Called by GRPO with a batch of completions for the SAME prompt.
-        All completions are different responses to the same starting observation.
 
-        For each completion:
-        1. Parse the action from the completion text
-        2. Get a fresh episode with the same starting conditions
-        3. Execute that action as step 1
-        4. Run the model forward for remaining steps to complete the episode
-        5. Return total episode reward
-
-        This gives GRPO a meaningful signal: which response strategy leads
-        to the best full-episode outcome?
-        """
         self._call_count += 1
 
-        # Get a starting observation that all rollouts will begin from
-        # We need the same initial conditions for fair advantage comparison
         base_obs = self._get_fresh_obs()
+        if not base_obs:
+            return [-1.0 for _ in completions]
 
         rewards = []
-        for i, completion in enumerate(completions):
-            # Each rollout gets its own fresh episode at the same difficulty/state
-            # We can't guarantee identical compromised nodes across resets,
-            # but within a training batch they will all be warmup-level fresh episodes.
-            # This is the standard GRPO approach — same prompt, independent rollouts.
-            try:
-                obs = self._get_fresh_obs()
-                if not obs:
-                    rewards.append(-1.0)
-                    continue
 
+        for completion in completions:
+            try:
+                obs = base_obs.copy()
                 total_reward = 0.0
                 done = False
 
-                # Step 1: execute the completion that GRPO is evaluating
-                action = parse_action(completion)
-                # Format bonus: reward clean JSON output
+                # ===== FORMAT CHECK =====
                 try:
-                    json.loads(completion.strip().split('\n')[0])
-                    format_bonus = 0.3
-                except (json.JSONDecodeError, ValueError):
-                    format_bonus = -0.1
+                    parsed = json.loads(completion.strip().split('\n')[0])
+                    if "tool" in parsed:
+                        format_bonus = 0.5
+                    else:
+                        format_bonus = 0.0
+                except Exception:
+                    format_bonus = -0.5
 
+                # ===== STEP 1 =====
+                action = parse_action(completion)
                 obs, step_reward, done = self._step(action)
+
+                # POLICY VIOLATION
+                if "policy_violation" in obs:
+                    step_reward -= 25.0
+
+                # SERVICE HEALTH SIGNAL
+                services = obs.get("services", {})
+                for svc in services.values():
+                    if svc.get("status") == "healthy":
+                        step_reward += 0.5
+                    elif svc.get("status") == "compromised":
+                        step_reward -= 1.0
+
                 total_reward += step_reward
 
-                # Steps 2+: run the model's own policy forward to episode end
-                # This is what teaches multi-step workflow — the model sees
-                # the consequences of its first action play out.
                 step_count = 1
+
+                # ===== MULTI-STEP ROLLOUT =====
                 while not done and step_count < self.max_episode_steps:
                     step_count += 1
+
                     next_action_text = self._generate_action(obs)
                     next_action = parse_action(next_action_text)
+
                     obs, step_reward, done = self._step(next_action)
+
+                    if "policy_violation" in obs:
+                        step_reward -= 25.0
+
+                    services = obs.get("services", {})
+                    for svc in services.values():
+                        if svc.get("status") == "healthy":
+                            step_reward += 0.5
+                        elif svc.get("status") == "compromised":
+                            step_reward -= 1.0
+
                     total_reward += step_reward
 
-                # Apply format bonus to total
+                    if self._call_count % 10 == 0:
+                        print(f"[Step] reward={step_reward:.2f}, done={done}")
+
+                # ===== LONG-HORIZON BONUS =====
+                if done:
+                    uptime = obs.get("global_uptime", 100)
+
+                    if uptime > 90:
+                        total_reward += 10.0
+                    elif uptime > 75:
+                        total_reward += 5.0
+
                 total_reward += format_bonus
 
                 rewards.append(total_reward)
 
-            except Exception as e:
+            except Exception:
                 rewards.append(-1.0)
 
-        # Log every 5 calls so you can see reward trajectory in real time
+        # ===== LOGGING =====
         if self._call_count % 5 == 0:
             mean_r = sum(rewards) / len(rewards) if rewards else 0
             max_r = max(rewards) if rewards else 0
             min_r = min(rewards) if rewards else 0
             std_r = (sum((r - mean_r) ** 2 for r in rewards) / len(rewards)) ** 0.5 if rewards else 0
+
             print(
                 f"[Reward] Call {self._call_count} | "
                 f"mean={mean_r:.2f} max={max_r:.2f} min={min_r:.2f} std={std_r:.2f}"
@@ -409,18 +385,12 @@ class ZeroTrustEpisodeReward:
         return rewards
 
 
-# ─── SIMPLE REWARD FUNCTION (used when --fast-mode is set) ───────────────────
+# ================= FAST STEP REWARD =================
 
 class ZeroTrustStepReward:
-    """
-    Single-step reward function. Faster but weaker learning signal.
-    Use this only if episode rollouts are too slow for your compute budget.
-    All 8 GRPO rollouts are evaluated against the same environment reset.
-    """
 
     def __init__(self, base_url: str):
         self.base_url = base_url
-        self._initial_obs = None
         self._call_count = 0
 
     def _reset(self) -> dict:
@@ -431,28 +401,47 @@ class ZeroTrustStepReward:
             return {}
 
     def __call__(self, completions: list[str], prompts: list[str] = None, **kwargs) -> list[float]:
+
         self._call_count += 1
         rewards = []
 
         for completion in completions:
-            # Reset to fresh state for each completion so they're independent
             self._reset()
             action = parse_action(completion)
 
             try:
-                json.loads(completion.strip())
-                format_bonus = 0.3
-            except (json.JSONDecodeError, ValueError):
-                format_bonus = -0.1
+                parsed = json.loads(completion.strip())
+                if "tool" in parsed:
+                    format_bonus = 0.5
+                else:
+                    format_bonus = 0.0
+            except Exception:
+                format_bonus = -0.5
 
             try:
                 resp = requests.post(f"{self.base_url}/step", json=action, timeout=15)
+
                 if resp.status_code == 200:
                     data = resp.json()
+
                     reward = float(data["reward"]["value"]) + format_bonus
+                    obs = data.get("observation", {})
+
+                    if "policy_violation" in obs:
+                        reward -= 25.0
+
+                    services = obs.get("services", {})
+                    for svc in services.values():
+                        if svc.get("status") == "healthy":
+                            reward += 0.5
+                        elif svc.get("status") == "compromised":
+                            reward -= 1.0
+
                     rewards.append(reward)
+
                 else:
                     rewards.append(-1.0)
+
             except Exception:
                 rewards.append(-1.0)
 
@@ -461,7 +450,6 @@ class ZeroTrustStepReward:
             print(f"[Reward] Step-mode call {self._call_count} | mean={mean_r:.2f}")
 
         return rewards
-
 
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
@@ -500,20 +488,7 @@ def main():
     model.enable_input_require_grads()
     print(f"[Train] Model loaded on {next(model.parameters()).device}")
 
-    # ── SFT warm-start (optional but strongly recommended) ──
-    # This runs ONE epoch on expert demonstrations so the model learns:
-    #   1. The exact JSON format the environment expects
-    #   2. The 4-step workflow sequence (query -> ticket -> approval -> isolate)
-    #   3. What a forensically-specific justification looks like
-    #
-    # Memory fixes for T4 (15GB VRAM):
-    #   - gradient_checkpointing: trades compute for ~30% VRAM reduction
-    #   - dynamic padding: pads only to the longest sample in each batch,
-    #     NOT to max_length=2048 — this was the direct cause of the OOM crash
-    #   - per_device_train_batch_size=1 with gradient_accumulation_steps=4
-    #
-    # Label masking: labels=-100 for system/user turns so the model only
-    # learns to predict its own JSON outputs, not the observation text.
+   
     if args.sft_data and os.path.exists(args.sft_data):
         print(f"\n[Train] SFT warm-start from {args.sft_data}...")
         import json as _json
@@ -627,10 +602,7 @@ def main():
     # ── Collect GRPO training dataset ──
     dataset = collect_training_prompts(n_prompts=args.dataset_size)
 
-    # ── Build reward function ──
-    # Episode rollouts give a richer signal but are slower.
-    # On a T4 Colab (slow inference), use ZeroTrustStepReward.
-    # On an A100/H100, use ZeroTrustEpisodeReward.
+    
     use_episode_rewards = os.environ.get("USE_EPISODE_REWARDS", "1") == "1"
 
     if use_episode_rewards:
@@ -644,23 +616,6 @@ def main():
     def zero_trust_reward(completions, **kwargs):
         return reward_obj(completions, **kwargs)
 
-    # ── GRPO config ──
-    # Key parameters explained:
-    #
-    # max_completion_length=250: must be large enough for a full JSON action with
-    #   a detailed justification. The previous value of 120 was causing truncation
-    #   on nearly every completion (clipped_ratio: 1.0 in logs). Truncated JSON
-    #   can't be parsed. All reward signal was noise.
-    #
-    # temperature=0.9: keeps entropy alive for exploration. The previous run
-    #   showed entropy collapsing to near-zero by step 80. That means the model
-    #   was producing identical outputs and GRPO had zero variance to learn from.
-    #
-    # gradient_accumulation_steps=8: effective batch size = 8 * 1 * 8 = 64.
-    #   Small models need large effective batches for stable GRPO gradients.
-    #
-    # num_generations=8: 8 rollouts per prompt. GRPO needs at least 2 to compute
-    #   advantages. 8 gives stable estimates without excessive compute.
 
     training_args = GRPOConfig(
         output_dir=args.output_dir,
