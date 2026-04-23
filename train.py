@@ -49,6 +49,7 @@ import argparse
 import requests
 import torch
 import random
+from peft import LoraConfig, get_peft_model
 from datasets import Dataset
 from trl import GRPOConfig, GRPOTrainer
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -209,98 +210,39 @@ def build_obs_text(obs: dict) -> str:
 
 # ─── DATASET COLLECTION ──────────────────────────────────────────────────────
 
-def collect_training_prompts(n_prompts: int = 200) -> Dataset:
-    """
-    Runs a mix of exploration strategies to generate diverse episode starting states.
-
-    The key insight: GRPO learns by comparing 8 different responses to the same
-    observation. If all your training prompts look the same (same alerts, same state),
-    the model collapses. We need diverse states — freshly reset episodes, mid-episode
-    states after an investigation, states with ticket pending, etc.
-
-    Strategy mix:
-      60% — freshly reset (agent sees raw alerts, must decide where to investigate)
-      25% — post-investigation (agent has SIEM evidence, must file ticket)
-      15% — post-ticket (agent has approved ticket, must check approval)
-
-    This mirrors the real distribution of decisions in a successful episode.
-    """
-    print(f"[Dataset] Collecting {n_prompts} diverse prompts from environment...")
-
+def collect_training_prompts(n_prompts: int = 30) -> Dataset:
+    print(f"[Dataset] Collecting {n_prompts} prompts from environment...")
     prompts = []
-    episode = 0
-    all_nodes = ["hr_db", "payment", "frontend"]
-
+    import random
+    import time
+    actions = [{"tool_name": "query_siem_logs", "payload": {"node": n}, "justification": "investigating"} for n in ["hr_db", "payment", "frontend", "api_gateway"]]
+    
     while len(prompts) < n_prompts:
-        episode += 1
-
         try:
-            resp = requests.post(f"{BASE_URL}/reset", json={"task_id": "auto"}, timeout=10)
+            # THE FIX: Increased timeout from 10 to 40 so Groq has time to write!
+            resp = requests.post(f"{BASE_URL}/reset", json={"task_id": "auto"}, timeout=40)
+            
             if resp.status_code != 200:
+                print(f"[Rate Limit] Groq API cooling down... ({len(prompts)}/{n_prompts})")
+                time.sleep(10)
                 continue
-            obs = resp.json()
-        except Exception:
-            continue
-
-        # 60% — fresh state prompt
-        if random.random() < 0.60 or len(prompts) >= n_prompts:
-            prompt = f"{SYSTEM_PROMPT}\n\n{build_obs_text(obs)}\n\nYour action:"
-            prompts.append({"prompt": prompt})
-            if len(prompts) % 20 == 0:
-                print(f"[Dataset] {len(prompts)}/{n_prompts} collected (episode {episode})")
-            continue
-
-        # Advance state by querying a node — creates post-investigation prompt
-        query_node = random.choice(all_nodes)
-        try:
-            step_resp = requests.post(f"{BASE_URL}/step", json={
-                "tool_name": "query_siem_logs",
-                "payload": {"node": query_node},
-                "justification": "investigating"
-            }, timeout=15)
-            if step_resp.status_code != 200:
-                continue
-            step_data = step_resp.json()
-            obs = step_data["observation"]
-            done = step_data["done"]
-        except Exception:
-            continue
-
-        if done:
-            continue
-
-        # 25% — post-investigation prompt
-        if random.random() < 0.70:
-            prompt = f"{SYSTEM_PROMPT}\n\n{build_obs_text(obs)}\n\nYour action:"
-            prompts.append({"prompt": prompt})
-            if len(prompts) % 20 == 0:
-                print(f"[Dataset] {len(prompts)}/{n_prompts} collected (episode {episode})")
-            continue
-
-        # 15% — try to get to post-ticket state
-        ticket_node = query_node
-        siem_out = obs.get("command_output", "")
-        if step_data["reward"]["value"] > 0:
-            try:
-                ticket_resp = requests.post(f"{BASE_URL}/step", json={
-                    "tool_name": "file_ticket",
-                    "payload": {
-                        "node": ticket_node,
-                        "justification": f"SIEM confirms active threat: {siem_out[:200]}"
-                    },
-                    "justification": "filing ticket with forensic evidence"
-                }, timeout=15)
-                if ticket_resp.status_code == 200:
-                    t_data = ticket_resp.json()
-                    obs = t_data["observation"]
-                    if not t_data["done"] and obs.get("active_ticket_id"):
-                        prompt = f"{SYSTEM_PROMPT}\n\n{build_obs_text(obs)}\n\nYour action:"
-                        prompts.append({"prompt": prompt})
-                        if len(prompts) % 20 == 0:
-                            print(f"[Dataset] {len(prompts)}/{n_prompts} collected (episode {episode})")
-            except Exception:
-                pass
-
+                
+            obs, done, step = resp.json(), False, 0
+            while not done and step < 8 and len(prompts) < n_prompts:
+                step += 1
+                prompts.append({"prompt": f"{SYSTEM_PROMPT}\n\n{build_obs_text(obs)}\n\nYour action:"})
+                
+                # THE FIX: Increased timeout here too
+                step_resp = requests.post(f"{BASE_URL}/step", json=random.choice(actions), timeout=40)
+                if step_resp.status_code != 200: break
+                obs = step_resp.json()["observation"]
+                done = step_resp.json()["done"]
+                
+        except Exception as e:
+            # THE FIX: Actually print the error so we aren't flying blind!
+            print(f"[Network] Error: {e}. Retrying in 5s...")
+            time.sleep(5)
+            
     print(f"[Dataset] Done. {len(prompts)} prompts collected.")
     return Dataset.from_list(prompts[:n_prompts])
 
@@ -553,6 +495,9 @@ def main():
         device_map="auto",
         trust_remote_code=True
     )
+    lora_config = LoraConfig(r=8, target_modules=["q_proj", "v_proj"], task_type="CAUSAL_LM")
+    model = get_peft_model(model, lora_config)
+    model.enable_input_require_grads()
     print(f"[Train] Model loaded on {next(model.parameters()).device}")
 
     # ── SFT warm-start (optional but strongly recommended) ──
@@ -752,13 +697,13 @@ def main():
 
     print(f"\n[Train] Starting GRPO training...")
     print(f"[Train] Config: {args.max_steps} steps, {args.num_generations} rollouts/prompt")
-    print(f"[Train] Completion length: 250 tokens (fixed from 120)")
-    print(f"[Train] Temperature: 0.9 (fixed from 0.2)")
+    print(f"[Train] Completion length: 250 tokens ")
+    print(f"[Train] Temperature: 0.9 ")
     print(f"[Train] What to watch:")
-    print(f"[Train]   reward_std > 5.0 after step 5: GRPO has real signal")
-    print(f"[Train]   reward mean trending from -30 toward 0: learning happening")
-    print(f"[Train]   entropy > 0.5 throughout: model still exploring")
-    print(f"[Train]   clipped_ratio < 0.5: completions not being truncated")
+    print(f"[Train] reward_std > 5.0 after step 5: GRPO has real signal")
+    print(f"[Train] reward mean trending from -30 toward 0: learning happening")
+    print(f"[Train] entropy > 0.5 throughout: model still exploring")
+    print(f"[Train] clipped_ratio < 0.5: completions not being truncated")
     print()
 
     train_result = trainer.train()
@@ -769,7 +714,8 @@ def main():
 
     # ── Save ──
     output_path = args.output_dir + "-final"
-    model.save_pretrained(output_path)
+    merged = model.merge_and_unload(); 
+    merged.save_pretrained(output_path)
     tokenizer.save_pretrained(output_path)
     print(f"[Train] Model saved to {output_path}")
 

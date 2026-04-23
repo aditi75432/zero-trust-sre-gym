@@ -152,7 +152,13 @@ Respond ONLY with valid JSON, no surrounding text:
   "difficulty_description": "One sentence describing the CVE and attack vector"
 }}"""
 
-    return call_llm_json(prompt, temperature=0.7, model="llama-3.1-8b-instant")
+    return call_llm_json(prompt, 
+                         temperature=0.7, 
+                         model="llama-3.1-8b-instant",
+                         )
+    scenario["cve_context"] = live_cve_context
+
+    return scenario
 
 
 def _static_pick(difficulty: str) -> dict:
@@ -201,5 +207,7 @@ def _normalize(raw: dict, difficulty: str = "unknown") -> dict: # <-- FIX: Accep
             "siem_evidence_template",
             "Unauthorized IAM role assumption. Source IP {ip}. Role {role} active outside policy. Data transfer anomaly detected."
         ),
-        "difficulty_description": raw.get("difficulty_description", f"{difficulty} security incident")
+        "difficulty_description": raw.get("difficulty_description", f"{difficulty} security incident"),
+        "cve_context": raw.get("cve_context","{difficulty} security incident")
+    
     }

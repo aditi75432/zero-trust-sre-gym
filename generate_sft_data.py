@@ -148,7 +148,7 @@ def run_scripted_episode() -> dict | None:
         }
         messages.append({"role": "assistant", "content": format_action(action)})
 
-        resp = requests.post(f"{BASE_URL}/step", json=action, timeout=15)
+        resp = requests.post(f"{BASE_URL}/step", json=action, timeout=45)
         if resp.status_code != 200:
             return None
 
@@ -193,7 +193,7 @@ def run_scripted_episode() -> dict | None:
         }
         messages.append({"role": "assistant", "content": format_action(action)})
         
-        resp = requests.post(f"{BASE_URL}/step", json=action, timeout=15)
+        resp = requests.post(f"{BASE_URL}/step", json=action, timeout=45)
         if resp.status_code != 200:
             return None
         
@@ -220,7 +220,7 @@ def run_scripted_episode() -> dict | None:
         }
         messages.append({"role": "assistant", "content": format_action(action)})
         
-        resp = requests.post(f"{BASE_URL}/step", json=action, timeout=15)
+        resp = requests.post(f"{BASE_URL}/step", json=action, timeout=45)
         if resp.status_code != 200:
             return None
         
@@ -247,7 +247,7 @@ def run_scripted_episode() -> dict | None:
         }
         messages.append({"role": "assistant", "content": format_action(action)})
         
-        resp = requests.post(f"{BASE_URL}/step", json=action, timeout=15)
+        resp = requests.post(f"{BASE_URL}/step", json=action, timeout=45)
         if resp.status_code != 200:
             return None
         

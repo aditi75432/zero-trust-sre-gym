@@ -1,0 +1,73 @@
+version: "3.9"
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_FILE: frontend_service.py
+        SERVICE_PORT: "5003"
+    ports:
+      - "5003:5003"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - zero_trust_net
+
+  payment:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_FILE: payment_service.py
+        SERVICE_PORT: "5004"
+    ports:
+      - "5004:5004"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - zero_trust_net
+
+  hr_db:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_FILE: hr_db_service.py
+        SERVICE_PORT: "5005"
+    ports:
+      - "5005:5005"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - zero_trust_net
+
+  gym:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "7860:7860"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - CURRICULUM_PATH=/data/curriculum.json
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - curriculum_data:/data
+    depends_on:
+      - frontend
+      - payment
+      - hr_db
+    networks:
+      - zero_trust_net
+
+networks:
+  zero_trust_net:
+    driver: bridge
+
+volumes:
+  curriculum_data:

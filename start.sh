@@ -1,30 +1,37 @@
 #!/bin/bash
 
-echo "Starting Zero Trust Enterprise-in-a-Box..."
+set -e
 
-# 1. Start the Rogue Service (Nginx) in the background
-nginx &
+echo "[START] Zero Trust SRE Gym — Enterprise Security RL Environment"
+echo "[START] Launching microservice layer..."
 
-# 2. Start the Mock Jira ITSM on port 8080 in the background
-cat << 'EOF' > jira_app.py
-from fastapi import FastAPI
-import uuid
+pip install flask --quiet 2>/dev/null || true
 
-app = FastAPI()
-tickets = {}
+python frontend_service.py &
+FRONTEND_PID=$!
 
-@app.post("/ticket")
-def create(ip: str):
-    ticket_id = str(uuid.uuid4())[:8]
-    tickets[ticket_id] = ip
-    return {"id": ticket_id}
-    
-@app.get("/ticket/{ticket_id}")
-def get(ticket_id: str):
-    return {"approved": True}
-EOF
+python payment_service.py &
+PAYMENT_PID=$!
 
-uvicorn jira_app:app --host 0.0.0.0 --port 8080 &
+python hr_db_service.py &
+HRDB_PID=$!
 
-# 3. Start the OpenEnv Zero Trust Server on the mandatory port 7860
+echo "[START] Waiting for microservices to initialise..."
+sleep 3
+
+for port in 5003 5004 5005; do
+    for attempt in 1 2 3 4 5; do
+        if curl -s "http://localhost:${port}/health" > /dev/null 2>&1; then
+            echo "[START] Port ${port} ready."
+            break
+        fi
+        sleep 1
+    done
+done
+
+echo "[START] Microservice layer ready."
+echo "[START] Starting Zero Trust Gym API on port 7860..."
+
 uvicorn server.app:app --host 0.0.0.0 --port 7860
+
+wait $FRONTEND_PID $PAYMENT_PID $HRDB_PID

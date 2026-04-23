@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+ARG SERVICE_FILE
+ARG SERVICE_PORT
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir flask
+
+COPY ${SERVICE_FILE} service.py
+
+ENV SERVICE_PORT=${SERVICE_PORT}
+
+EXPOSE ${SERVICE_PORT}
+
+CMD ["python", "service.py"]
