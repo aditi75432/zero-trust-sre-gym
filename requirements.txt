@@ -13,3 +13,4 @@ trl>=0.13.0
 transformers>=4.40.0
 torch>=2.2.0
 accelerate>=0.28.0
+openenv-core>=0.2.1
