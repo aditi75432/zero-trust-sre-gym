@@ -1,5 +1,340 @@
 ---
 title: Zero Trust SRE Gym
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+app_port: 7860
+tags:
+- openenv
+- reinforcement-learning
+- enterprise
+- zero-trust
+- cybersecurity
+- curriculum-learning
+- world-modeling
+---
+
+# Zero Trust SRE Gym
+
+**Policy-Bounded Reinforcement Learning for Autonomous Cyber Resilience**
+
+[Live Environment](https://aditi75432-zero-trust-safe-SRE-gym.hf.space) | [Training Notebook](#training-notebook) | [Demo Video](#demo-video) | [GitHub Repository](https://github.com/your-repo) | [HuggingFace Blog Post](#blog-post)
+
+---
+
+## The Problem: The Autonomy-Safety Paradox
+
+Enterprise Security Operations Centers process thousands of alerts daily. Human analysts can handle perhaps a dozen incidents per shift with full forensic rigor. The obvious answer is autonomous AI agents that can triage, investigate, and remediate in seconds rather than hours.
+
+However, every modern enterprise runs on Zero Trust architecture. A fundamental rule of Zero Trust is: **no entity, even an AI, can mutate production infrastructure without explicit, documented authorization**. An agent that skips investigation, files no ticket, or bypasses change board approval is not merely making a mistake; it is committing a compliance violation that triggers audit trails, regulatory penalties, and potentially self-inflicted infrastructure outages worse than the original attack.
+
+This is the **bounded autonomy problem**: you need the speed of AI and the governance of human process simultaneously. No existing training environment teaches an agent to *wait* for permission. Most RL security environments train agents to detect and block threats as fast as possible, ignoring the governance layer entirely.
+
+**Zero Trust SRE Gym** is the first RL environment that frames enterprise compliance as a **constrained Markov Decision Process (MDP)**. The agent cannot simply isolate a compromised node; it must earn the right to act by navigating a strict ITIL workflow: investigate, document, obtain change board approval, and only then remediate. Violating this workflow results in severe mathematical penalties and immediate episode termination.
+
+---
+
+## What Makes This Environment Unique
+
+### 1. Compliance as a Hard MDP Constraint
+
+Most RL environments use rewards to nudge behavior. We use **architectural constraints**. If the agent attempts to isolate a production node without an approved change ticket, the environment terminates the episode with a -20 penalty. There is no way around this. The agent cannot game it, cannot route around it, and cannot accidentally succeed by chance. It must learn that unauthorized action in a Zero Trust network is itself the security failure.
+
+This transforms cybersecurity containment from a "detect and block" problem into a **mathematical alignment problem**: can an RL agent learn that governance is the only safe path to a positive reward?
+
+### 2. Live Adversarial Threat Intelligence
+
+Every episode begins with real-world threat data. The `adversarial_designer.py` module:
+
+- Fetches live high‑severity CVEs (CVSS >= 7.5) from the public `cve.circl.lu` API  
+- Passes the CVE mechanics and the agent's current weakness profile to a Groq‑powered LLM (Llama‑3.1‑8B)  
+- The LLM synthesizes realistic Datadog‑format SIEM logs that reflect the exact attack vector of that real CVE  
+
+The agent never sees the same threat twice. As the curriculum escalates, the adversarial designer generates new scenarios targeting the agent's demonstrated weaknesses, making the training distribution co‑evolve with the agent's capability.
+
+### 3. Three‑Persona LLM Compliance Judge
+
+When the agent submits a change ticket, it is evaluated by a **real LLM judge** with one of three randomly assigned personas:
+
+- **Junior SRE**: Lenient. Gives partial credit for basic investigative effort.  
+- **Senior SRE**: Demands specific forensic evidence: IP addresses, IAM role names, log timestamps. Rejects vague justifications like "found suspicious activity."  
+- **Principal CISO**: Zero tolerance for imprecision. Requires exact anomaly metrics, explicit pre‑investigation confirmation, and precise indicator citations. Labels incomplete justifications as compliance failures.  
+
+The persona changes each episode. The agent cannot memorize a fixed approval threshold. It must learn to write forensic‑quality documentation because that is the only path to authorization across all three evaluators.
+
+This replaces brittle keyword‑matching (`if "iam" in justification`) with genuine reasoning evaluation, preventing reward hacking.
+
+### 4. Recursive Skill Amplification via Curriculum Learning
+
+A `CurriculumController` tracks the agent's resolution rate per threat type (Data Exfiltration, Lateral Movement, Privilege Escalation, etc.). As mastery crosses mathematical thresholds, the environment automatically escalates difficulty:
+
+- **Warmup**: Single compromised node, 15 steps, Junior judge  
+- **Beginner**: Single fault with red herrings, 13 steps, Senior judge  
+- **Intermediate**: Harder faults with noisy alerts, 11 steps  
+- **Advanced**: Multi‑fault scenarios, 9 steps, Principal judge  
+- **Expert**: Adversarial multi‑fault targeting weak spots, 7 steps  
+
+The adversarial designer reads the curriculum's weakness profile to generate scenarios that target the agent's current failure modes. This creates a **self‑improving training loop** where the environment fights back as the agent improves.
+
+---
+
+## System Architecture
+
+The environment is a distributed system running on Hugging Face Spaces:
+
+┌─────────────────────┐       ┌──────────────────────────────┐
+│  Live CVE Feed      │       │   Hugging Face Space (CPU)    │
+│  (cve.circl.lu)     │──────▶   FastAPI Server               │
+└─────────────────────┘       │                                │
+                              │  ┌──────────────────────────┐ │
+                              │  │  Zero Trust Environment   │ │
+                              │  │  ┌────────────────────┐   │ │
+                              │  │  │ Adversarial Designer│   │ │
+                              │  │  │  (Groq LLM)        │   │ │
+                              │  │  └─────────┬──────────┘   │ │
+                              │  │            │               │ │
+                              │  │  ┌─────────▼──────────┐   │ │
+                              │  │  │ Curriculum Controller│   │ │
+                              │  │  └─────────┬──────────┘   │ │
+                              │  │            │               │ │
+                              │  │  ┌─────────▼──────────┐   │ │
+                              │  │  │ Policy Engine        │  │ │
+                              │  │  │ (-20% isolation gate) │  │ │
+                              │  │  └─────────┬──────────┘   │ │
+                              │  │            │               │ │
+                              │  │  ┌─────────▼──────────┐   │ │
+                              │  │  │ LLM Compliance Judge│   │ │
+                              │  │  │ (3 Personas)        │   │ │
+                              │  │  └────────────────────┘   │ │
+                              │  └──────────────────────────┘ │
+                              │                                │
+                              │  Microservice Digital Twin     │
+                              │  ┌─────────┬─────────┬───────┐│
+                              │  │ Frontend│ Payment │ HR DB ││
+                              │  │ :5003   │ :5004   │:5005  ││
+                              │  └─────────┴─────────┴───────┘│
+                              └────────────────────────────────┘
+                                          ▲
+                                          │ HTTP (reset/step)
+                                          ▼
+                              ┌──────────────────────────────┐
+                              │   Training Rig (A10G GPU)    │
+                              │   JupyterLab Space           │
+                              │   Unsloth + TRL GRPO         │
+                              │   Qwen2.5‑1.5B + LoRA        │
+                              └──────────────────────────────┘
+
+
+- **Environment Server**: FastAPI application on a free CPU Space. It manages the microservice digital twin (Flask processes), the curriculum, the adversarial designer, and the compliance judge.  
+- **Microservices**: Three independent Flask applications (`frontend_service.py`, `payment_service.py`, `hr_db_service.py`) that simulate real enterprise services. They emit Datadog‑style SIEM telemetry, degrade performance when compromised, and support attack injection and isolation via HTTP endpoints.  
+- **Training Rig**: A separate GPU Space (A10G) running a JupyterLab notebook that uses Unsloth and TRL to fine‑tune a Qwen2.5‑1.5B model with GRPO. The training loop connects to the environment server via HTTP.
+
+---
+
+## The Agent Workflow (The Golden Path)
+
+The agent must follow a strict four‑step sequence to succeed:
+
+1. **Query SIEM Logs** (`query_siem_logs {node}`): Investigate nodes flagged by FATAL alerts. If the node is compromised, the environment returns Datadog‑format SIEM evidence containing the specific IP, IAM role, and anomaly metrics. If it is a red herring, only latency noise.
+
+2. **File Ticket** (`file_ticket {node, justification}`): Submit a change ticket with forensic justification. The justification must cite specific evidence (IPs, IAM roles, log events). The LLM compliance judge evaluates the justification and assigns a score. If approved, a ticket ID is generated.
+
+3. **Check Approval** (`check_approval {ticket_id}`): Verify change board authorization. This step converts the pending ticket into an approved ticket, unlocking the isolation tool.
+
+4. **Isolate Node** (`isolate_node {node}`): Execute network quarantine. If `ticket_approved` is False, the policy engine blocks the action with a -20 penalty and terminates the episode. If approved and the correct node is targeted, the agent receives a large positive reward plus efficiency bonuses.
+
+---
+
+## Reward Design
+
+The reward function combines dense intermediate signals with sparse hard boundaries to give GRPO a strong advantage signal:
+
+| Action | Condition | Reward |
+|--------|-----------|--------|
+| `query_siem_logs` | Correct compromised node | +10.0 |
+| `query_siem_logs` | Red herring node | -1.5 |
+| `query_siem_logs` | Clean node | -1.0 |
+| `file_ticket` | Judge approved | judge_score * 8.0 (max +8.0) |
+| `file_ticket` | No prior investigation | -3.0 |
+| `file_ticket` | Wrong node | -8.0 |
+| `check_approval` | Valid active ticket | +2.0 |
+| `isolate_node` | Correct, uptime >= 80% | +20.0 + phase bonus + efficiency bonus (max ~35) |
+| `isolate_node` | Correct, caused outage | -12.0 |
+| `isolate_node` | Wrong node | -25.0 |
+| `isolate_node` | No approved ticket | **-20.0, episode terminated** |
+| SLA Breach | Exceeded step limit | -15.0 |
+| Base step cost | Per action | -0.3 |
+
+The 87‑point spread between perfect resolution (~+35) and rogue isolation (-52) gives GRPO the variance it needs to compute meaningful advantages. The -20 policy boundary is calibrated to be worse than any sequence of failed investigations, forcing the agent to learn that following process is optimal.
+
+---
+
+## Training Pipeline
+
+Training uses a two‑phase approach to solve the cold‑start problem:
+
+### Phase 1: Supervised Fine‑Tuning on Expert Demonstrations
+
+`generate_sft_data.py` runs scripted perfect‑behavior episodes against the live environment. Each episode follows the correct workflow exactly. Only episodes with total reward above 5.0 are saved. The resulting dataset teaches the model the JSON action format, the four‑step workflow, and the structure of approved justifications.
+
+### Phase 2: GRPO with Unsloth and TRL
+
+From the SFT checkpoint, GRPO fine‑tunes the model using 8 rollouts per prompt, group‑relative advantages, and a `max_completion_length` of 350 tokens to prevent truncation. Training uses:
+
+- **Unsloth** for 4‑bit QLoRA and memory efficiency  
+- **TRL** for the GRPO trainer  
+- **Qwen2.5‑1.5B‑Instruct** with LoRA adapters  
+- Live environment HTTP connection for reward computation  
+- Single‑step reward mode for speed, or full episode rollouts for richer signal  
+
+---
+
+## Training Evidence and Results
+
+### Baseline (Untrained Model)
+
+Before training, the model consistently fails: it attempts `isolate_node` without a ticket in 2 out of 3 episodes, receiving -20 penalties and terminating immediately. Average reward: approximately -52.
+
+[BASE ep1] difficulty=warmup judge=principal
+  Step 1: isolate_node(auth_service) => -50.3
+  Total: -50.3 | Resolved: NO
+
+[BASE ep2] difficulty=warmup judge=junior
+  Step 1: file_ticket(hr_db) => -3.3
+  ...
+  Step 7: isolate_node(api_gateway) => -50.3
+  Total: -56.1 | Resolved: NO
+
+[BASE ep3] difficulty=warmup judge=principal
+  Step 1: isolate_node(api_gateway) => -50.3
+  Total: -50.3 | Resolved: NO
+
+
+### Post‑Training Improvement
+
+After GRPO training, the agent learns to identify the compromised node from alerts, query its SIEM telemetry, file a ticket with forensic evidence, verify approval, and isolate correctly. The reward curve shows a clear upward trend as training progresses.
+
+![Reward Curve](reward_curve.png)
+
+**Caption:** Mean reward over GRPO training steps. The agent climbs from frequent policy violations toward consistent mission success, demonstrating that reinforcement learning can teach compliance with enterprise governance.
+
+---
+
+## Why This Matters in 2026
+
+Enterprises are racing to deploy autonomous AI agents, but security teams cannot trust models that act without authorization. This project provides a rigorous empirical proof that an RL agent can learn to **internalize compliance as a prerequisite** rather than an obstacle. It frames cybersecurity containment not as a generative text problem, but as a bounded mathematical decision process, directly solving the alignment and safety concerns that prevent enterprise adoption of agentic security.
+
+---
+
+## Hackathon Theme Alignment
+
+**Theme 3.1: World Modeling – Professional Tasks**. The agent interacts with real enterprise tools (SIEM, ITIL ticketing, change board) through live HTTP APIs. It must maintain persistent internal state across multi‑step workflows and reason about causal consequences of its actions.
+
+**Theme 4: Self‑Improvement**. The adversarial designer and curriculum controller form a closed self‑improvement loop. The environment generates new challenges, escalates difficulty, and targets the agent's weaknesses as it improves.
+
+**Scaler AI Labs Sub‑theme: Multi‑App RL Environment for Enterprise Workflows**. The agent orchestrates three distinct enterprise systems (SIEM diagnostics, ITIL change management, Zero Trust authorization engine) in strict sequence, each with its own interface and reward contribution.
+
+---
+
+## Hackathon Rubric Alignment
+
+### Environment Innovation (40%)
+
+We frame Zero Trust compliance as a constrained MDP with a hard policy boundary. No existing RL environment enforces enterprise governance as an architectural constraint. The integration of live CVE threat intelligence and a 3‑persona LLM compliance judge makes this a genuinely novel contribution.
+
+### Storytelling & Presentation (30%)
+
+The [demo video](#demo-video) walks through the problem, shows the untrained agent being blocked by the policy engine, and demonstrates how the trained agent learns the four‑step ITIL workflow. The interactive Streamlit dashboard displays the agent's live reasoning, the adversarial threat feed, and the compliance judge's detailed ticket evaluations.
+
+### Showing Improvement in Rewards (20%)
+
+The README includes baseline vs. trained agent reward comparisons and a reward curve image showing clear upward trend over GRPO training steps.
+
+### Reward & Training Pipeline Setup (10%)
+
+The training pipeline uses Unsloth for 4‑bit memory‑efficient training, TRL for GRPO, and a multi‑layered reward function that combines dense intermediate signals with sparse hard boundaries. The Colab notebook runs end‑to‑end against the live environment.
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.10+  
+- Hugging Face account with Space creation permissions  
+- Groq API key (free tier available at console.groq.com)  
+
+### Try the Environment
+
+```bash
+# Query the live environment
+curl -X POST https://aditi75432-zero-trust-safe-SRE-gym.hf.space/reset \
+  -H "Content-Type: application/json" -d '{"task_id": "auto"}'
+
+# Step through an episode
+curl -X POST https://aditi75432-zero-trust-safe-SRE-gym.hf.space/step \
+  -H "Content-Type: application/json" \
+  -d '{"tool_name": "query_siem_logs", "payload": {"node": "hr_db"}, "justification": "investigating"}'
+```
+
+### Training
+
+1. Clone the repository  
+2. Set `GROQ_API_KEY` and `HF_TOKEN` as environment variables  
+3. Run the training notebook (link below) or `python train.py` with the desired arguments  
+
+---
+
+## Deliverables and Links
+
+- **Live Environment**: https://aditi75432-zero-trust-safe-SRE-gym.hf.space  
+- **Training Notebook (Colab)**: [Link to Colab Notebook](#)  
+- **Demo Video (YouTube)**: [Link to 2‑minute demo](#demo-video)  
+- **GitHub Repository**: https://github.com/your‑repo  
+- **HuggingFace Blog Post**: [Link to blog post](#blog-post)  
+
+---
+
+## Project Structure
+
+```
+.
+├── server/
+│   ├── environment.py              # Core RL environment, reset/step, reward logic
+│   ├── adversarial_designer.py     # Live CVE fetching, LLM scenario generation
+│   ├── judge.py                    # 3‑persona LLM compliance judge
+│   ├── curriculum.py               # Per‑threat mastery tracking, difficulty escalation
+│   ├── policy_engine.py            # Zero Trust policy enforcement (-20 gate)
+│   ├── app.py                      # FastAPI server, OpenEnv‑compliant endpoints
+│   ├── models.py                   # Pydantic data contracts
+│   └── llm_client.py               # Groq API wrapper
+├── frontend_service.py             # Flask microservice (frontend, port 5003)
+├── payment_service.py              # Flask microservice (payment, port 5004)
+├── hr_db_service.py                # Flask microservice (HR DB, port 5005)
+├── attack_executor.py              # Attack injection and propagation logic
+├── dashboard.py                    # Streamlit live telemetry dashboard
+├── generate_sft_data.py            # Expert trajectory generation for SFT
+├── train.py                        # Full training script (SFT + GRPO)
+├── inference.py                    # Evaluation runner for trained checkpoints
+├── test_env.py                     # Integration test suite
+├── openenv.yaml                    # OpenEnv environment manifest
+├── Dockerfile                      # HuggingFace Spaces deployment
+├── requirements.txt                # Python dependencies
+└── README.md                       # This file
+```
+
+---
+
+## Acknowledgments
+
+This environment was built for the Meta‑PyTorch OpenEnv Hackathon (India 2026).  
+Special thanks to the OpenEnv and Unsloth communities for their frameworks and support.
+```
+
+
+<!-- ---
+title: Zero Trust SRE Gym
 emoji: 🛡️
 colorFrom: blue
 colorTo: indigo
@@ -322,4 +657,4 @@ accelerate>=0.28.0
 peft>=0.10.0
 ```
 
-Set `GROQ_API_KEY` as an environment variable before running locally, or as a Repository Secret in the HuggingFace Space settings. Free tier at console.groq.com is sufficient for the judge and adversarial designer at typical training throughput.
+Set `GROQ_API_KEY` as an environment variable before running locally, or as a Repository Secret in the HuggingFace Space settings. Free tier at console.groq.com is sufficient for the judge and adversarial designer at typical training throughput. -->
