@@ -66,7 +66,12 @@ def take_step(action: Action):
             detail="Environment not initialized. Call POST /reset first.",
         )
 
-    obs, reward, terminated, truncated, info = env.step(action)
+    result = env.step(action)
+    obs = result.observation
+    reward = result.reward
+    terminated = result.terminated
+    truncated = result.truncated
+    info = result.info
 
     session_history.append({
         "step":             env.steps,

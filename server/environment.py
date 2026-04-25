@@ -7,7 +7,7 @@ from .adversarial_designer import generate_scenario
 from .curriculum import CurriculumController
 from . import policy_engine
 from . import attack_executor
-from openenv import BaseEnvironment
+from openenv import Environment, StepResult
 
 _curriculum = CurriculumController(
     persistence_path=os.environ.get("CURRICULUM_PATH", "/tmp/zero_trust_curriculum.json")
@@ -28,7 +28,7 @@ SERVICE_PORTS = {
 }
 
 
-class ZeroTrustEnv(BaseEnvironment):
+class ZeroTrustEnv(Environment):
 
     def __init__(self):
         self.curriculum = _curriculum
@@ -133,7 +133,7 @@ class ZeroTrustEnv(BaseEnvironment):
         )
         return self.state
 
-    def step(self, action: Action):
+    def step(self, action: Action)-> StepResult:
         if self.done:
             return self.state, Reward(value=0.0, message="Episode already finished."), True, False, {}
 
@@ -156,8 +156,14 @@ class ZeroTrustEnv(BaseEnvironment):
                 f"SLA BREACH: Episode exceeded {self.max_steps} step budget. "
                 f"Incident escalated to senior on-call."
             )
-            return self.state, Reward(value=sla_penalty, message=f"SLA breach after {self.steps} steps."), False, True, self._info()
-
+            reward_obj = Reward(value=round(value, 2), message=message)
+            return StepResult(
+                observation=self.state,
+                reward=reward_obj,
+                terminated=terminated,
+                truncated=truncated,
+                info=self._info()
+            )
         tool = action.tool_name
         if tool == "query_siem_logs":
             value, message = self._handle_query_siem(action)
