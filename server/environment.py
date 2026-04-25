@@ -1,13 +1,13 @@
 import os
 import random
 import time
+from dataclasses import dataclass
 from .models import Observation, Action, Reward, Alert
 from .judge import evaluate_ticket, evaluate_resolution
 from .adversarial_designer import generate_scenario
 from .curriculum import CurriculumController
 from . import policy_engine
 from . import attack_executor
-from openenv import Environment, StepResult
 
 _curriculum = CurriculumController(
     persistence_path=os.environ.get("CURRICULUM_PATH", "/tmp/zero_trust_curriculum.json")
@@ -27,8 +27,15 @@ SERVICE_PORTS = {
     "hr_db":    5005,
 }
 
+@dataclass
+class StepResult:
+    observation: Observation
+    reward: Reward
+    terminated: bool
+    truncated: bool
+    info: dict
 
-class ZeroTrustEnv(Environment):
+class ZeroTrustEnv:
 
     def __init__(self):
         self.curriculum = _curriculum
@@ -133,9 +140,16 @@ class ZeroTrustEnv(Environment):
         )
         return self.state
 
-    def step(self, action: Action)-> StepResult:
+    def step(self, action: Action) -> StepResult:
         if self.done:
-            return self.state, Reward(value=0.0, message="Episode already finished."), True, False, {}
+            reward_obj = Reward(value=0.0, message="Episode already finished.")
+            return StepResult(
+                observation=self.state,
+                reward=reward_obj,
+                terminated=True,
+                truncated=False,
+                info=self._info()
+            )
 
         self.steps += 1
 
@@ -149,8 +163,9 @@ class ZeroTrustEnv(Environment):
         if self.steps > self.max_steps:
             self.truncated = True
             self.done = True
-            sla_penalty = -15.0
-            self.episode_reward += sla_penalty
+            value = -15.0
+            message = f"SLA breach after {self.steps} steps."
+            self.episode_reward += value
             self._finalize_episode(success=False)
             self.state.command_output = (
                 f"SLA BREACH: Episode exceeded {self.max_steps} step budget. "
@@ -160,10 +175,11 @@ class ZeroTrustEnv(Environment):
             return StepResult(
                 observation=self.state,
                 reward=reward_obj,
-                terminated=terminated,
-                truncated=truncated,
+                terminated=True,
+                truncated=True,
                 info=self._info()
             )
+
         tool = action.tool_name
         if tool == "query_siem_logs":
             value, message = self._handle_query_siem(action)
@@ -186,7 +202,14 @@ class ZeroTrustEnv(Environment):
 
         terminated = self.done
         truncated = self.truncated
-        return self.state, Reward(value=round(value, 2), message=message), terminated, truncated, self._info()
+        reward_obj = Reward(value=round(value, 2), message=message)
+        return StepResult(
+            observation=self.state,
+            reward=reward_obj,
+            terminated=terminated,
+            truncated=truncated,
+            info=self._info()
+        )
 
     def _handle_query_siem(self, action: Action) -> tuple[float, str]:
         node = action.payload.get("node", "").strip()

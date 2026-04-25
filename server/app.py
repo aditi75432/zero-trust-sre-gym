@@ -21,7 +21,6 @@ session_history: list[dict] = []
 
 SERVICE_PORTS = {"frontend": 5003, "payment": 5004, "hr_db": 5005}
 
-
 @app.get("/")
 def health_check():
     return {
@@ -30,7 +29,6 @@ def health_check():
         "version": "3.0.0",
         "curriculum": env.curriculum.get_summary(),
     }
-
 
 @app.post("/reset", response_model=Observation)
 async def reset_environment(request: TaskRequest):
@@ -41,7 +39,6 @@ async def reset_environment(request: TaskRequest):
         return obs
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
-
 
 @app.get("/state")
 def get_current_state():
@@ -54,7 +51,6 @@ def get_current_state():
     state_dict["cve_context"]    = env.cve_context
     state_dict["siem_evidence_template"] = env.siem_evidence_template
     return state_dict
-
 
 @app.post("/step")
 def take_step(action: Action):
@@ -89,7 +85,6 @@ def take_step(action: Action):
         "info":        info,
     }
 
-
 @app.get("/history")
 def get_history():
     return {
@@ -99,17 +94,14 @@ def get_history():
         "episode_done":  env.done,
     }
 
-
 @app.get("/curriculum")
 def get_curriculum():
     return env.curriculum.get_summary()
-
 
 @app.post("/curriculum/reset")
 def reset_curriculum():
     env.curriculum.reset_mastery()
     return {"status": "ok", "message": "Curriculum reset to episode 0"}
-
 
 @app.get("/services")
 def get_service_health():
@@ -123,7 +115,6 @@ def get_service_health():
             results[name] = {"reachable": False, "status": "offline"}
     return results
 
-
 @app.get("/services/{service}/metrics")
 def get_service_metrics(service: str):
     port = SERVICE_PORTS.get(service)
@@ -134,7 +125,6 @@ def get_service_metrics(service: str):
         return r.json()
     except Exception:
         raise HTTPException(status_code=503, detail=f"Service {service} unreachable")
-
 
 @app.get("/services/{service}/logs")
 def get_service_logs(service: str):
