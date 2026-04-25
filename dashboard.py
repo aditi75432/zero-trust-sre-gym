@@ -163,6 +163,20 @@ c2.metric("Reward", f"{state.get('episode_reward', 0):.2f}")
 c3.metric("Difficulty", state.get("curriculum", {}).get("difficulty", ""))
 c4.metric("Ticket", state.get("active_ticket_id") or "None")
 
+cve_context = state.get("cve_context", "N/A")
+siem_template = state.get("siem_evidence_template", "N/A")
+command_output = state.get("command_output", "")
+
+col_threat, col_audit = st.columns(2)
+
+with col_threat:
+    st.subheader("Live Threat Intel Feed")
+    st.text_area("Raw CVE and SIEM Evidence", f"CVE Context: {cve_context}\n\nSIEM Evidence Template: {siem_template}", height=200)
+
+with col_audit:
+    st.subheader("Change Board Audit Log")
+    st.text_area("Latest Judge Feedback", command_output, height=200)
+
 st.subheader("Service Topology")
 st.plotly_chart(draw_topology(state.get("nodes", {})), use_container_width=True)
 

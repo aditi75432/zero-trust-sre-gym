@@ -7,6 +7,7 @@ from .adversarial_designer import generate_scenario
 from .curriculum import CurriculumController
 from . import policy_engine
 from . import attack_executor
+from openenv import BaseEnvironment
 
 _curriculum = CurriculumController(
     persistence_path=os.environ.get("CURRICULUM_PATH", "/tmp/zero_trust_curriculum.json")
@@ -27,7 +28,7 @@ SERVICE_PORTS = {
 }
 
 
-class ZeroTrustEnv:
+class ZeroTrustEnv(BaseEnvironment):
 
     def __init__(self):
         self.curriculum = _curriculum
@@ -37,6 +38,7 @@ class ZeroTrustEnv:
     def reset(self) -> Observation:
         self.steps = 0
         self.done = False
+        self.truncated = False
         self.action_history: list[dict] = []
         self.episode_reward: float = 0.0
         self.last_siem_output: str = ""
@@ -131,9 +133,9 @@ class ZeroTrustEnv:
         )
         return self.state
 
-    def step(self, action: Action) -> tuple[Observation, Reward, bool, dict]:
+    def step(self, action: Action):
         if self.done:
-            return self.state, Reward(value=0.0, message="Episode already finished."), True, {}
+            return self.state, Reward(value=0.0, message="Episode already finished."), True, False, {}
 
         self.steps += 1
 
@@ -145,6 +147,7 @@ class ZeroTrustEnv:
         })
 
         if self.steps > self.max_steps:
+            self.truncated = True
             self.done = True
             sla_penalty = -15.0
             self.episode_reward += sla_penalty
@@ -153,7 +156,7 @@ class ZeroTrustEnv:
                 f"SLA BREACH: Episode exceeded {self.max_steps} step budget. "
                 f"Incident escalated to senior on-call."
             )
-            return self.state, Reward(value=sla_penalty, message=f"SLA breach after {self.steps} steps."), True, self._info()
+            return self.state, Reward(value=sla_penalty, message=f"SLA breach after {self.steps} steps."), False, True, self._info()
 
         tool = action.tool_name
         if tool == "query_siem_logs":
@@ -175,7 +178,9 @@ class ZeroTrustEnv:
         self.state.active_ticket_id = self.active_ticket_id
         self.state.ticket_approved  = self.ticket_approved
 
-        return self.state, Reward(value=round(value, 2), message=message), self.done, self._info()
+        terminated = self.done
+        truncated = self.truncated
+        return self.state, Reward(value=round(value, 2), message=message), terminated, truncated, self._info()
 
     def _handle_query_siem(self, action: Action) -> tuple[float, str]:
         node = action.payload.get("node", "").strip()
@@ -221,7 +226,7 @@ class ZeroTrustEnv:
                 f"No outbound data transfer. Traffic pattern consistent with DDoS mitigation or maintenance."
             )
             self.state.command_output = rh_output
-            return -1.5, f"Red herring: {node} shows elevated latency — not a compromise."
+            return -1.5, f"Red herring: {node} shows elevated latency; not a compromise."
 
         clean_output = (
             f"[SIEM] {self._fake_timestamp()}\n"
@@ -266,7 +271,7 @@ class ZeroTrustEnv:
                 siem_evidence=self.last_siem_output,
                 persona=self.judge_persona,
             )
-            scaled_reward = judge_score * 5.0
+            scaled_reward = judge_score * 8.0
             passing = {"junior": 0.2, "senior": 0.3, "principal": 0.4}.get(self.judge_persona, 0.3)
 
             if judge_score >= passing:
@@ -322,6 +327,7 @@ class ZeroTrustEnv:
             self.state.command_output = pv.message
             if pv.rule == "NO_APPROVED_TICKET":
                 self.done = True
+                self.truncated = False
                 self._finalize_episode(success=False)
             return pv.penalty, pv.rule
 
@@ -356,6 +362,7 @@ class ZeroTrustEnv:
                         f"Efficiency bonus: +{efficiency_bonus:.1f} ({self.steps}/{self.max_steps} steps used)"
                     )
                     self.done = True
+                    self.truncated = False
                     self._finalize_episode(success=True)
                     return total, f"MISSION SUCCESS. Phase score: {phase_score:.2f}. Efficiency: +{efficiency_bonus:.1f}"
                 else:
@@ -365,6 +372,7 @@ class ZeroTrustEnv:
                         f"Services offline due to wrong isolation sequence."
                     )
                     self.done = True
+                    self.truncated = False
                     self._finalize_episode(success=False)
                     return -12.0, f"PARTIAL FAILURE: Threat contained but {100 - self.global_uptime:.0f}% uptime lost."
             else:
@@ -385,6 +393,7 @@ class ZeroTrustEnv:
                 f"Actual threat still active."
             )
             self.done = True
+            self.truncated = False
             self._finalize_episode(success=False)
             return -25.0, f"MISSION FAILED: Isolated clean node {target}. Real threat still active."
 

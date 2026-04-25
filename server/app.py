@@ -51,6 +51,8 @@ def get_current_state():
     state_dict["nodes"]          = env.nodes
     state_dict["curriculum"]     = env.curriculum.get_summary()
     state_dict["episode_reward"] = env.episode_reward
+    state_dict["cve_context"]    = env.cve_context
+    state_dict["siem_evidence_template"] = env.siem_evidence_template
     return state_dict
 
 
@@ -64,7 +66,7 @@ def take_step(action: Action):
             detail="Environment not initialized. Call POST /reset first.",
         )
 
-    obs, reward, done, info = env.step(action)
+    obs, reward, terminated, truncated, info = env.step(action)
 
     session_history.append({
         "step":             env.steps,
@@ -78,7 +80,7 @@ def take_step(action: Action):
     return {
         "observation": obs.model_dump(),
         "reward":      reward.model_dump(),
-        "done":        done,
+        "done":        terminated or truncated,
         "info":        info,
     }
 

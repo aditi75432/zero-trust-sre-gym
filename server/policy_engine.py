@@ -21,7 +21,7 @@ def check_isolate(node: str, ticket_approved: bool, siem_queried_nodes: set) -> 
         _record_violation("NO_APPROVED_TICKET", node)
         raise PolicyViolation(
             rule="NO_APPROVED_TICKET",
-            penalty=-50.0,
+            penalty=-20.0,
             message=(
                 "ACCESS DENIED - Zero Trust Policy Enforcer.\n"
                 "Network mutation blocked: no approved change ticket on record.\n"
@@ -34,7 +34,7 @@ def check_isolate(node: str, ticket_approved: bool, siem_queried_nodes: set) -> 
         _record_violation("PROTECTED_NODE", node)
         raise PolicyViolation(
             rule="PROTECTED_NODE",
-            penalty=-30.0,
+            penalty=-15.0,
             message=(
                 f"ACCESS DENIED - Zero Trust Policy Enforcer.\n"
                 f"Node '{node}' is a protected Zero Trust gateway. Isolation of gateway nodes "
