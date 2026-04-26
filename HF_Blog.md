@@ -143,6 +143,171 @@ The environment server and training agent communicate exclusively over HTTP. The
 This separation is intentional. It means training is realistic and fully reproducible. It also means a judge can reset the environment from a terminal and watch it behave exactly as described.
 
 ---
+# ## Live Integration Testing (Proof of Environment)
+
+PS D:\Downloads-D\Meta hack\Zero Trust SRE Gym> python test_env.py
+
+Zero Trust SRE Gym Demo
+=================================================================
+Server connected
+Episode: 1 | Difficulty: warmup
+
+=================================================================
+TEST 1: End-to-End Workflow
+=================================================================
+Episode started
+Difficulty: warmup
+Step: 1
+[WARNING] api_gateway: Elevated request latency. Possible DDoS or routine maintenance window.
+[WARNING] auth_service: Elevated request latency. Possible DDoS or routine maintenance window.
+[FATAL] frontend: CRITICAL: Suspicious outbound traffic detected from frontend. IAM role anomaly o
+[WARNING] auth_service: Multiple failed IAM token validations from internal subnet. Could be misconfigur
+
+-----------------------------------------------------------------
+Query SIEM hr_db
+-----------------------------------------------------------------
+Reward: -1.30
+Message: Clean node: hr_db shows no active threats.
+Output: [SIEM] 2026-04-26T10:25:06Z
+NODE: HR_DB
+STATUS: HEALTHY
+EVIDENCE: No anomalies detected. IAM role assumptions within policy. Traffic within baseline. No outbound data transfer.
+[LIVE NODE TELEMETRY]
+[
+Uptime: 100.0%
+Threats remaining: 1
+
+-----------------------------------------------------------------
+Query SIEM payment
+-----------------------------------------------------------------
+Reward: -1.30
+Message: Clean node: payment shows no active threats.
+Output: [SIEM] 2026-04-26T10:46:07Z
+NODE: PAYMENT
+STATUS: HEALTHY
+EVIDENCE: No anomalies detected. IAM role assumptions within policy. Traffic within baseline. No outbound data transfer.
+[LIVE NODE TELEMETRY]
+Uptime: 100.0%
+Threats remaining: 1
+
+-----------------------------------------------------------------
+Query SIEM frontend
+-----------------------------------------------------------------
+Reward: 9.70
+Message: CRITICAL: Found live threat on frontend. Excellent investigation.
+Output: [SIEM ALERT] 2026-04-26T10:18:09Z
+NODE: FRONTEND
+STATUS: COMPROMISED
+THREAT: DATA_EXFILTRATION
+EVIDENCE: Log evidence matching the CVE mechanics. Use 10.0.1.100 and role-name-svc. Example: {'timestamp
+Uptime: 100.0%
+Threats remaining: 1
+
+✅ Detected compromised node: frontend
+
+-----------------------------------------------------------------
+File Ticket
+-----------------------------------------------------------------
+Reward: 6.10
+Message: Judge [junior] APPROVED. Score: 0.80
+Output: TICKET INC-6452 APPROVED by Change Board.
+Compliance Judge [JUNIOR]: The justification cites specific forensic indicators and matches the available SIEM evidence, but could be more detailed in its exp
+Uptime: 100.0%
+Threats remaining: 1
+
+-----------------------------------------------------------------
+Check Approval
+-----------------------------------------------------------------
+Reward: 1.70
+Message: Approval confirmed. Ready to remediate.
+Output: Change Board Authorization: INC-6452 - APPROVED
+You are now authorized to execute network isolation. Proceed with isolate_node.
+Uptime: 100.0%
+Threats remaining: 1
+
+-----------------------------------------------------------------
+Isolate Node
+-----------------------------------------------------------------
+Reward: 29.70
+Message: MISSION SUCCESS. Phase score: 0.80. Efficiency: +3.6
+Output: ALL THREATS NEUTRALIZED
+Uptime maintained: 80.0%
+Workflow assessment: The agent demonstrated good investigative skills by querying SIEM logs on the correct nodes and isolating the compromised node. Ho
+Uptime: 80.0%
+Episode done
+
+🎯 Total reward: 47.2
+✅ SUCCESS — Proper Zero Trust workflow followed
+
+=================================================================
+TEST 2: Policy Enforcement (FAIL CASE)
+=================================================================
+
+-----------------------------------------------------------------
+Unauthorized Isolation
+-----------------------------------------------------------------
+Reward: -20.30
+Message: NO_APPROVED_TICKET
+Output: ACCESS DENIED -- Zero Trust Policy Enforcer.
+Network mutation blocked: no approved change ticket on record.
+Required workflow: query_siem_logs -> file_ticket -> check_approval -> isolate_node.
+Episode
+Uptime: 100.0%
+Episode done
+Threats remaining: 1
+✅ PASS — Policy correctly enforced
+
+=================================================================
+TEST 3: LLM Judge Behavior
+=================================================================
+
+-----------------------------------------------------------------
+Weak Ticket
+-----------------------------------------------------------------
+Reward: -8.30
+Message: Ticket filed against clean node hr_db.
+Output: TICKET REJECTED: 'hr_db' does not appear in active threat telemetry. Filing against clean infrastructure wastes Change Board resources.
+Uptime: 100.0%
+Threats remaining: 1
+✅PASS — Judge rejects weak reasoning
+
+=================================================================
+CURRICULUM STATE
+=================================================================
+Episodes: 3
+Difficulty: warmup
+Resolution rate: 0.33
+data_exfiltration: 0.10
+lateral_movement: 0.00
+privilege_escalation: 0.00
+supply_chain: 0.00
+multi_fault: 0.00
+
+**Demo Complete**
+
+
+To verify that the Hugging Face Space API enforces the Zero Trust constraints correctly, the repository includes `test_env.py`. This script runs an automated client-side integration test against the live environment.
+
+The output proves three critical environment mechanics:
+
+### 1. The Dynamic "Golden Path" Works
+The environment generates alerts dynamically. In **Test 1**, the client cannot hardcode the compromised node; it must loop through the services (`hr_db`, `payment`, `frontend`), querying SIEM logs and absorbing small `-1.3` penalties for clean nodes until it finds the actual live threat on `frontend` (earning `+9.7`). It then successfully files a ticket, gets Junior SRE approval, and isolates the node for a massive `+29.70` payout.
+
+### 2. The Policy Engine is Unforgiving
+**Test 2** proves the hard CMDP boundary. The client attempts to call `isolate_node` immediately upon episode reset. The server intercepts the HTTP request, blocks the mutation, returns a `-20.30` penalty with the `NO_APPROVED_TICKET` flag, and terminates the episode on step 1.
+
+> `ACCESS DENIED -- Zero Trust Policy Enforcer.`
+> `Network mutation blocked: no approved change ticket on record.`
+
+### 3. The LLM Judge Catches Hallucinations
+**Test 3** tests the semantic evaluation. The client attempts to file a vague ticket against a clean node. The LLM Judge intercepts it, realizes the telemetry does not support the claim, and rejects the ticket with an `-8.30` penalty, citing: *"Filing against clean infrastructure wastes Change Board resources."*
+
+Finally, the **Curriculum State** output proves the environment is actively tracking the agent's resolution rate (currently 0.33) and updating mastery tensors for specific threat types (e.g., `data_exfiltration: 0.10`) to control future difficulty scaling.
+
+
+
+
+---
 
 ## What the Training Actually Showed
 
