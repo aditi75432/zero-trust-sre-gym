@@ -422,7 +422,7 @@ All links are public and tested.
 | HuggingFace Blog Post | HF_Blog.md |
 | Code Repository | https://github.com/aditi75432/zero-trust-sre-gym |
 
-All training plots (graph_1_side_by_side.png, graph_2_overlay_raw.png, graph_3_overlay_normalized.png, reward_curve_normalized.png) are committed to the github repository and embedded above. No large files are stored in the Space.
+All training plots (graph_1_side_by_side.png, graph_2_overlay_raw.png, graph_3_overlay_normalized.png, reward_curve_normalized.png) embedded above. 
 
 ---
 
@@ -471,8 +471,6 @@ Full training runs via the Colab notebook linked above.
 ├── docker-compose.yml              # Local development setup
 ├── Dockerfile                      # HuggingFace Spaces deployment
 ├── requirements.txt                # Python dependencies
-├── Diagrams                        # All architecture/working diagrams
-├── Result Graphs                   # Training results
 ├── HF_Blog.md                      
 ├── zero_trust_sre_train.ipynb      # Training Colab File (Executed)
 └── README.md                       # This file
