@@ -32,7 +32,10 @@ tags:
 | **What the agent learns** | That process is not overhead. It is the only valid path to a positive reward |
 | **Result** | Mean reward rises from -13.8 (untrained) to +9.7 (trained), policy violations drop to near zero |
 
-![Normalized Policy Adherence Over Training](graph_3_overlay_normalized.png)
+<p align="center">
+  <img src="https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/JrU7XOVCcNoE-BqYWSv87.png" width="500"/>
+</p>
+
 
 *The untrained agent operates entirely in the red violation zone. After GRPO training, policy adherence stabilizes above 0.82.*
 
@@ -135,6 +138,7 @@ auth_service ──►  frontend
 
 
 
+![Cyber Twin Diagram](https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/uPZY0yXrgHLuJMccKpr3B.jpeg)
 
 
 
@@ -198,6 +202,7 @@ The environment server and training agent communicate exclusively over HTTP, exa
 
 
 
+![Architecture Diagram](https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/Q8LlWa_quf9QaPhJlpoV5.jpeg)
 
 
 
@@ -228,6 +233,7 @@ Execute network quarantine. If `ticket_approved` is false, the policy engine blo
 
 
 
+![Agent Workflow Diagram](https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/S-paGL7KnbBBAkxsKdcvi.jpeg)
 
 
 
@@ -278,6 +284,7 @@ From the SFT checkpoint, GRPO fine-tunes the model using 8 rollouts per prompt a
 
 
 
+![Training Loop Diagram](https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/IcYzM2k91BvLHOvAZjJku.jpeg)
 
 
 
@@ -332,25 +339,40 @@ The following plots are all committed to this repository as PNG files.
 
 **Before vs. After: Side-by-Side Comparison**
 
-![Before vs After Training](graph_1_side_by_side.png)
+<p align="center">
+  <img src="https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/ZGjk_OojuqinnUsVSvUwk.png" width="500"/>
+</p>
+
 
 *Left: Untrained baseline episode rewards, averaging -8.5 with catastrophic -20 violations. Right: GRPO training curve showing the agent escaping the violation zone over 100 steps.*
 
 **Reward Trajectory: Escaping the Policy Violation Zone**
 
-![Reward Trajectory](graph_2_overlay_raw.png)
+<p align="center">
+  <img src="https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/yDbzfGYD7RBrQy31elpLz.png" width="500"/>
+</p>
+
+
+
 
 *The red dashed line marks the untrained baseline average (-8.5). The green training trend escapes this zone after approximately 15 steps and stabilizes above it.*
 
 **Normalized Policy Adherence (0 = Violation, 1 = Compliant)**
 
-![Policy Adherence](graph_3_overlay_normalized.png)
+<p align="center">
+  <img src="https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/u00gXls1jyAKkeD8bbU5F.png" width="500"/>
+</p>
+
+
+
 
 *The agent climbs from 0.22 (frequent violations) to 0.83-0.85 sustained compliance. The baseline remains flat at 0.46, well inside the red violation zone.*
 
 **Smoothed Training Curve**
 
-![Smoothed Training](reward_curve_normalized.png)
+<p align="center">
+  <img src="https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/RlEC7PDknrGPZhB5flRG8.png" width="500"/>
+</p>
 
 *Smoothed view of the same adherence metric. The sharp climb between steps 10 and 25 corresponds to the model learning that it must query SIEM logs before any other action.*
 
@@ -395,12 +417,12 @@ All links are public and tested.
 | Deliverable | Link |
 |---|---|
 | Live Environment (HuggingFace Space) | https://aditi75432-zero-trust-safe-SRE-gym.hf.space |
-| Training Notebook (Colab) | YOUR_COLAB_LINK_HERE |
+| Training Notebook (Colab) | https://colab.research.google.com/drive/1Y_zqkxElx8H0zt8_AnR3vqf93NBT5ncy?usp=sharing |
 | Demo Video (YouTube, under 2 minutes) | YOUR_YOUTUBE_LINK_HERE |
-| HuggingFace Blog Post | YOUR_BLOG_LINK_HERE |
-| Code Repository | YOUR_GITHUB_LINK_HERE |
+| HuggingFace Blog Post | HF_Blog.md |
+| Code Repository | https://github.com/aditi75432/zero-trust-sre-gym |
 
-All training plots (graph_1_side_by_side.png, graph_2_overlay_raw.png, graph_3_overlay_normalized.png, reward_curve_normalized.png) are committed to this repository and embedded above. No large files are stored in the Space.
+All training plots (graph_1_side_by_side.png, graph_2_overlay_raw.png, graph_3_overlay_normalized.png, reward_curve_normalized.png) are committed to the github repository and embedded above. No large files are stored in the Space.
 
 ---
 
@@ -459,3 +481,4 @@ Full training runs via the Colab notebook linked above.
 ---
 
 Built for the Meta-PyTorch OpenEnv Hackathon, India 2026.
+Aditi Mehta
