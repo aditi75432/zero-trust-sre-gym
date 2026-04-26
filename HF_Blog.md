@@ -145,6 +145,12 @@ This separation is intentional. It means training is realistic and fully reprodu
 ---
 # ## Live Integration Testing (Proof of Environment)
 
+
+To prove the environment's live mechanics, we run an automated integration test (`test_env.py`) that acts as a client interacting with the live Hugging Face Space API. 
+
+The output below demonstrates the dynamic threat generation, the strict policy enforcement, and the LLM judge's semantic evaluation:
+
+```text
 PS D:\Downloads-D\Meta hack\Zero Trust SRE Gym> python test_env.py
 
 Zero Trust SRE Gym Demo
@@ -160,8 +166,8 @@ Difficulty: warmup
 Step: 1
 [WARNING] api_gateway: Elevated request latency. Possible DDoS or routine maintenance window.
 [WARNING] auth_service: Elevated request latency. Possible DDoS or routine maintenance window.
-[FATAL] frontend: CRITICAL: Suspicious outbound traffic detected from frontend. IAM role anomaly o
-[WARNING] auth_service: Multiple failed IAM token validations from internal subnet. Could be misconfigur
+[FATAL] frontend: CRITICAL: Suspicious outbound traffic detected from frontend. IAM role anomaly...
+[WARNING] auth_service: Multiple failed IAM token validations from internal subnet. Could be misconfigur...
 
 -----------------------------------------------------------------
 Query SIEM hr_db
@@ -173,7 +179,6 @@ NODE: HR_DB
 STATUS: HEALTHY
 EVIDENCE: No anomalies detected. IAM role assumptions within policy. Traffic within baseline. No outbound data transfer.
 [LIVE NODE TELEMETRY]
-[
 Uptime: 100.0%
 Threats remaining: 1
 
@@ -199,7 +204,7 @@ Output: [SIEM ALERT] 2026-04-26T10:18:09Z
 NODE: FRONTEND
 STATUS: COMPROMISED
 THREAT: DATA_EXFILTRATION
-EVIDENCE: Log evidence matching the CVE mechanics. Use 10.0.1.100 and role-name-svc. Example: {'timestamp
+EVIDENCE: Log evidence matching the CVE mechanics. Use 10.0.1.100 and role-name-svc. Example: {'timestamp...
 Uptime: 100.0%
 Threats remaining: 1
 
@@ -211,7 +216,7 @@ File Ticket
 Reward: 6.10
 Message: Judge [junior] APPROVED. Score: 0.80
 Output: TICKET INC-6452 APPROVED by Change Board.
-Compliance Judge [JUNIOR]: The justification cites specific forensic indicators and matches the available SIEM evidence, but could be more detailed in its exp
+Compliance Judge [JUNIOR]: The justification cites specific forensic indicators and matches the available SIEM evidence, but could be more detailed in its exp...
 Uptime: 100.0%
 Threats remaining: 1
 
@@ -232,7 +237,7 @@ Reward: 29.70
 Message: MISSION SUCCESS. Phase score: 0.80. Efficiency: +3.6
 Output: ALL THREATS NEUTRALIZED
 Uptime maintained: 80.0%
-Workflow assessment: The agent demonstrated good investigative skills by querying SIEM logs on the correct nodes and isolating the compromised node. Ho
+Workflow assessment: The agent demonstrated good investigative skills by querying SIEM logs on the correct nodes and isolating the compromised node...
 Uptime: 80.0%
 Episode done
 
@@ -242,7 +247,6 @@ Episode done
 =================================================================
 TEST 2: Policy Enforcement (FAIL CASE)
 =================================================================
-
 -----------------------------------------------------------------
 Unauthorized Isolation
 -----------------------------------------------------------------
@@ -251,16 +255,16 @@ Message: NO_APPROVED_TICKET
 Output: ACCESS DENIED -- Zero Trust Policy Enforcer.
 Network mutation blocked: no approved change ticket on record.
 Required workflow: query_siem_logs -> file_ticket -> check_approval -> isolate_node.
-Episode
+
 Uptime: 100.0%
 Episode done
 Threats remaining: 1
+
 ✅ PASS — Policy correctly enforced
 
 =================================================================
 TEST 3: LLM Judge Behavior
 =================================================================
-
 -----------------------------------------------------------------
 Weak Ticket
 -----------------------------------------------------------------
@@ -269,7 +273,8 @@ Message: Ticket filed against clean node hr_db.
 Output: TICKET REJECTED: 'hr_db' does not appear in active threat telemetry. Filing against clean infrastructure wastes Change Board resources.
 Uptime: 100.0%
 Threats remaining: 1
-✅PASS — Judge rejects weak reasoning
+
+✅ PASS — Judge rejects weak reasoning
 
 =================================================================
 CURRICULUM STATE
@@ -283,8 +288,8 @@ privilege_escalation: 0.00
 supply_chain: 0.00
 multi_fault: 0.00
 
-**Demo Complete**
-
+Demo Complete
+```
 
 To verify that the Hugging Face Space API enforces the Zero Trust constraints correctly, the repository includes `test_env.py`. This script runs an automated client-side integration test against the live environment.
 
