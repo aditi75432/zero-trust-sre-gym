@@ -90,7 +90,8 @@ If the agent tries to skip any step and jump straight to isolation, the policy e
 
 This transforms cybersecurity containment from a simple detect-and-block task into a **Constrained Markov Decision Process**. The agent has to learn that process is not overhead. Process is the only valid path to a positive reward.
 
-![Agent Workflow](llm.jpg)
+
+![Agent Workflow Diagram](https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/sWhDc0yKgxies22kJxQiu.jpeg)
 
 *The only valid path through the environment. Every shortcut ends in episode termination.*
 
@@ -132,7 +133,8 @@ The adversarial designer reads the curriculum's weakness profile and generates s
 
 ## The System Architecture
 
-![Architecture](architecture_diagram.png)
+
+![Architecture Diagram](https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/xTWtAtyfB57kKtZVbGgoy.jpeg)
 
 *Live CVE feed on the left, the full environment stack in the center, training rig at the bottom communicating over HTTP exactly as a real enterprise agent would.*
 
@@ -163,15 +165,28 @@ It never once completed the four-step workflow. Not once.
 
 After GRPO training with Unsloth and TRL, the behavior changed completely:
 
-![Before vs After Training](graph_1_side_by_side.png)
+<p align="center">
+  <img src="https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/bO-KSneNyGAKGJjeIFgrL.png" width="500"/>
+</p>
+
 
 *Left: Untrained baseline episodes, all in the violation zone, average at negative 8.5. Right: GRPO training curve climbing from negative 17 to stabilizing above positive 5 by step 25 and holding through step 100.*
 
-![Reward Trajectory](graph_2_overlay_raw.png)
+
+<p align="center">
+  <img src="https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/pGEC79MnbxgXBTm-eXoTw.png" width="500"/>
+</p>
+
+
+![graph_2_overlay_raw]()
 
 *The green training curve escaping the red baseline zone around step 15. This is what learning institutional compliance looks like in reward space.*
 
-![Policy Adherence Normalized](graph_3_overlay_normalized.png)
+
+<p align="center">
+  <img src="https://cdn-uploads.huggingface.co/production/uploads/69c60e74d6a5a36e8db49d9a/50_HwH0h6yU03aaKis8jS.png" width="500"/>
+</p>
+
 
 *Normalized from 0 to 1. The trained agent climbs from 0.22 success rate to sustained 0.83 to 0.85 compliance. The untrained baseline stays flat deep in the red zone.*
 
