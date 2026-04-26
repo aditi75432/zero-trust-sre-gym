@@ -4,6 +4,8 @@ PROTECTED_NODES = {"api_gateway", "auth_service"}
 MAX_CONCURRENT_ISOLATIONS = 2
 REQUIRE_EVIDENCE_BEFORE_TICKET = True
 
+ROGUE_ISOLATION_PENALTY = -20.0
+
 _policy_violations: list[dict] = []
 _isolation_log: dict[str, float] = {}
 
@@ -21,9 +23,9 @@ def check_isolate(node: str, ticket_approved: bool, siem_queried_nodes: set) -> 
         _record_violation("NO_APPROVED_TICKET", node)
         raise PolicyViolation(
             rule="NO_APPROVED_TICKET",
-            penalty=-20.0,
+            penalty=ROGUE_ISOLATION_PENALTY,
             message=(
-                "ACCESS DENIED - Zero Trust Policy Enforcer.\n"
+                "ACCESS DENIED -- Zero Trust Policy Enforcer.\n"
                 "Network mutation blocked: no approved change ticket on record.\n"
                 "Required workflow: query_siem_logs -> file_ticket -> check_approval -> isolate_node.\n"
                 "Episode terminated. Rogue isolation is a critical compliance violation."
@@ -36,9 +38,10 @@ def check_isolate(node: str, ticket_approved: bool, siem_queried_nodes: set) -> 
             rule="PROTECTED_NODE",
             penalty=-15.0,
             message=(
-                f"ACCESS DENIED - Zero Trust Policy Enforcer.\n"
+                f"ACCESS DENIED -- Zero Trust Policy Enforcer.\n"
                 f"Node '{node}' is a protected Zero Trust gateway. Isolation of gateway nodes "
-                f"requires CISO-level escalation and is not permitted through the standard Change Board workflow."
+                f"requires CISO-level escalation and is not permitted through the standard "
+                f"Change Board workflow."
             ),
         )
 
@@ -49,7 +52,7 @@ def check_isolate(node: str, ticket_approved: bool, siem_queried_nodes: set) -> 
             rule="MAX_ISOLATIONS_EXCEEDED",
             penalty=-20.0,
             message=(
-                f"POLICY BLOCK - Maximum concurrent isolations ({MAX_CONCURRENT_ISOLATIONS}) reached.\n"
+                f"POLICY BLOCK -- Maximum concurrent isolations ({MAX_CONCURRENT_ISOLATIONS}) reached.\n"
                 f"De-escalate an existing isolation before adding new ones. "
                 f"Currently isolated: {list(_isolation_log.keys())}"
             ),
@@ -61,7 +64,7 @@ def check_isolate(node: str, ticket_approved: bool, siem_queried_nodes: set) -> 
             rule="NO_PRIOR_INVESTIGATION",
             penalty=-15.0,
             message=(
-                f"POLICY BLOCK - Zero Trust requires evidence before action.\n"
+                f"POLICY BLOCK -- Zero Trust requires evidence before action.\n"
                 f"Node '{node}' was not investigated with query_siem_logs before ticket submission. "
                 f"File isolation requests only for nodes with confirmed SIEM evidence."
             ),
@@ -75,7 +78,7 @@ def check_ticket(node: str, justification: str, siem_queried_nodes: set) -> None
             rule="TICKET_WITHOUT_INVESTIGATION",
             penalty=-3.0,
             message=(
-                f"TICKET REJECTED - Policy requires SIEM investigation before filing.\n"
+                f"TICKET REJECTED -- Policy requires SIEM investigation before filing.\n"
                 f"Query SIEM logs on '{node}' first to gather forensic evidence."
             ),
         )
@@ -86,8 +89,9 @@ def check_ticket(node: str, justification: str, siem_queried_nodes: set) -> None
             rule="INSUFFICIENT_JUSTIFICATION",
             penalty=-2.0,
             message=(
-                "TICKET REJECTED - Justification too brief.\n"
-                "Change Board requires specific forensic evidence: IP address, IAM role name, and observed anomaly."
+                "TICKET REJECTED -- Justification too brief.\n"
+                "Change Board requires specific forensic evidence: IP address, "
+                "IAM role name, and observed anomaly."
             ),
         )
 

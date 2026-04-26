@@ -6,96 +6,173 @@ app: server.app:app
 port: 7860
 
 description: >
-  Zero Trust SRE Gym: An RL environment where a language model agent learns to 
-  diagnose and contain enterprise security incidents through strict compliance workflows.
-  
-  The agent must navigate a real Zero Trust policy enforcement layer: investigate
-  SIEM telemetry, file forensically-justified change tickets, get change board approval,
-  then isolate the compromised node. Attempting isolation without an approved ticket
-  triggers a -50 penalty and episode termination.
-  
-  Features: adversarial LLM scenario generation (Groq), 3-persona compliance judge
-  (Junior/Senior/Principal), automatic curriculum controller, cascading failure simulation.
+  Zero Trust SRE Gym: An RL environment where a language model agent learns to
+  diagnose and contain enterprise security incidents through a strict 4-step
+  Zero Trust compliance workflow. The environment enforces compliance as a hard
+  MDP constraint — attempting isolation without an approved change ticket
+  triggers a −50 penalty and immediate episode termination. Features live CVE
+  threat intelligence (cve.circl.lu), a 3-persona LLM compliance judge
+  (Junior / Senior / Principal CISO), an automatic curriculum controller, and
+  a cascading-failure microservice digital twin.
 
 author: "Aditi Mehta"
+
 tags:
+  - openenv
+  - reinforcement-learning
   - zero-trust
-  - security
-  - sre
+  - cybersecurity
   - enterprise
   - compliance
   - curriculum-learning
-  - adversarial
+  - world-modeling
+  - self-improvement
+  - grpo
+
+# ── OpenEnv standard endpoints ──────────────────────────────────────────────
+# reset  POST /reset    → Observation
+# step   POST /step     → { observation, reward, done, info }
+# state  GET  /state    → full internal state dict
+# ───────────────────────────────────────────────────────────────────────────
 
 observation_space:
   type: dict
   fields:
     active_alerts:
       type: list
-      description: "Security alerts with severity (FATAL/WARNING), target node, and symptom text"
+      item_type: dict
+      description: >
+        Security alerts with severity (FATAL / WARNING), target_node, and
+        symptom text. Mix of real threats and red-herring nodes. Agent must
+        triage FATAL alerts first.
     command_output:
       type: string
-      description: "Result of last tool execution — SIEM logs, ticket status, approval response"
+      description: >
+        Result of the last tool execution. Contains Datadog-style SIEM logs
+        for query_siem_logs, ticket status for file_ticket, approval text for
+        check_approval, or containment confirmation for isolate_node.
     global_uptime:
       type: float
       range: [0.0, 100.0]
-      description: "Current production health. Isolating wrong nodes triggers cascading failures"
+      description: >
+        Current production health as a percentage. Drops by 10% for every
+        node that is isolated or goes offline due to cascading failures.
+        Isolating the wrong node causes outages that penalise the reward.
     active_ticket_id:
       type: string
       nullable: true
-      description: "Current ITIL change ticket ID if ticket has been filed and approved"
+      description: >
+        ITIL change ticket ID (e.g. INC-4821) once a ticket has been filed
+        and conditionally approved by the compliance judge. Null until
+        file_ticket succeeds.
     ticket_approved:
       type: boolean
-      description: "Whether change board has authorized the isolation action"
+      description: >
+        True only after check_approval has confirmed change board
+        authorisation. isolate_node requires this to be True.
     difficulty:
       type: string
-      values: [warmup, beginner, intermediate, advanced, expert]
+      enum: [warmup, beginner, intermediate, advanced, expert]
+      description: Current curriculum difficulty level.
+    episode_number:
+      type: integer
+      description: Total episodes completed so far (curriculum counter).
     judge_persona:
       type: string
-      values: [junior, senior, principal]
+      enum: [junior, senior, principal]
+      description: >
+        Randomly assigned LLM compliance judge persona for this episode.
+        Controls the forensic-evidence threshold for ticket approval.
 
 action_space:
   type: dict
   fields:
     tool_name:
       type: string
-      values: [query_siem_logs, file_ticket, check_approval, isolate_node]
+      enum: [query_siem_logs, file_ticket, check_approval, isolate_node]
+      description: Which Zero Trust workflow tool to invoke.
     payload:
       type: dict
-      description: "Tool arguments. node for most tools, ticket_id for check_approval"
+      description: >
+        Tool arguments. For query_siem_logs / file_ticket / isolate_node:
+        {"node": "<node_name>"}. For file_ticket additionally requires
+        {"justification": "<forensic evidence string>"}. For check_approval:
+        {"ticket_id": "<INC-XXXX>"}.
     justification:
       type: string
-      description: "Agent's reasoning. Evaluated by LLM judge on file_ticket calls"
+      description: >
+        Agent's stated reasoning. Evaluated by the LLM compliance judge on
+        file_ticket calls. Must cite specific IPs, IAM roles, or log events
+        from the SIEM output to pass Senior / Principal personas.
 
 reward:
-  min: -50.0
+  min: -20.0
   max: 35.0
+  description: >
+    Multi-layered reward combining dense intermediate signals with a hard
+    episodic boundary. The −50 rogue-isolation penalty is calibrated to be
+    worse than any possible sequence of failed investigations, forcing the
+    GRPO optimizer to internalize compliance as the only profitable path.
   structure:
-    query_siem_logs_correct: +3.0
-    query_siem_logs_red_herring: -1.5
-    query_siem_logs_clean: -1.0
-    file_ticket_llm_judge: "judge_score * 5.0  (range: -5.0 to +5.0)"
-    file_ticket_no_investigation: -3.0
-    check_approval: +2.0
-    isolate_correct_uptime_ok: "+20.0 + phase_score*8.0 + efficiency_bonus (max ~35)"
-    isolate_correct_uptime_low: -12.0
-    isolate_wrong_node: -25.0
-    isolate_no_ticket: -50.0
-    sla_breach: -15.0
-    base_step_cost: -0.3
+    query_siem_logs_correct_node:    +10.0
+    query_siem_logs_red_herring:     -1.5
+    query_siem_logs_clean_node:      -1.0
+    file_ticket_llm_judge:           "judge_score × 8.0  (range −8.0 to +8.0)"
+    file_ticket_no_investigation:    -3.0
+    file_ticket_wrong_node:          -8.0
+    check_approval_valid_ticket:     +2.0
+    check_approval_no_ticket:        -0.5
+    isolate_correct_uptime_ok:       "+20.0 + phase_score×8.0 + efficiency_bonus (max ~35)"
+    isolate_correct_caused_outage:   -12.0
+    isolate_wrong_node:              -25.0
+    isolate_no_approved_ticket:      "-20.0  ← hard Zero Trust policy boundary, episode terminated"
+    sla_breach:                      -15.0
+    base_step_cost:                  -0.3
 
 tasks:
   - id: auto
-    description: "Curriculum-controlled. Starts at warmup, escalates as agent improves."
+    description: >
+      Curriculum-controlled. Starts at warmup, escalates automatically as
+      per-threat-type mastery crosses mathematical thresholds.
+
   - id: warmup_single_fault
     difficulty: warmup
     description: "Single compromised node. SLA: 15 steps. Judge: junior."
-  - id: intermediate_redherring
+
+  - id: beginner_single_redherring
+    difficulty: beginner
+    description: "Single fault with red-herring WARNING alerts. SLA: 13 steps. Judge: senior."
+
+  - id: intermediate_harder_fault
     difficulty: intermediate
-    description: "Node with red herring alerts. Agent must distinguish signal from noise. SLA: 11 steps."
+    description: "Harder fault types with noisy alerts. SLA: 11 steps. Judge: senior."
+
   - id: advanced_multifault
     difficulty: advanced
-    description: "Two simultaneous compromises. Both must be isolated. SLA: 9 steps."
+    description: "Two simultaneous compromises. Both must be isolated. SLA: 9 steps. Judge: principal."
+
   - id: expert_adversarial
     difficulty: expert
-    description: "LLM-designed scenario targeting agent weaknesses. SLA: 7 steps. Judge: principal."
+    description: >
+      LLM-designed scenario (Groq adversarial designer) targeting the agent's
+      tracked weaknesses. SLA: 7 steps. Judge: principal.
+
+nodes:
+  - id: api_gateway
+    role: protected_gateway
+    description: "Zero Trust gateway. Cannot be isolated via standard Change Board workflow."
+  - id: auth_service
+    role: protected_gateway
+    description: "Authentication gateway. Protected node — isolation requires CISO escalation."
+  - id: frontend
+    role: vulnerable_target
+    port: 5003
+    description: "Web frontend microservice. Can be compromised via lateral movement."
+  - id: payment
+    role: vulnerable_target
+    port: 5004
+    description: "Payment processing microservice. High-value target for data exfiltration."
+  - id: hr_db
+    role: vulnerable_target
+    port: 5005
+    description: "HR database microservice. Contains PII. Target for bulk-read exfiltration."

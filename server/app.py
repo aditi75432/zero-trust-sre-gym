@@ -81,10 +81,11 @@ def take_step(action: Action):
     return {
         "observation": obs.model_dump(),
         "reward":      reward.model_dump(),
-        "done":        terminated or truncated,
+        "terminated":  terminated,              # OpenEnv Validator
+        "truncated":   truncated,               # OpenEnv Validator
+        "done":        terminated or truncated, # My Notebook
         "info":        info,
     }
-
 @app.get("/history")
 def get_history():
     return {
@@ -136,3 +137,11 @@ def get_service_logs(service: str):
         return r.json()
     except Exception:
         raise HTTPException(status_code=503, detail=f"Service {service} unreachable")
+
+def main():
+    import uvicorn
+   
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+if __name__ == "__main__":
+    main()
