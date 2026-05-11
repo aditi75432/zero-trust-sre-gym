@@ -21,7 +21,7 @@ tags:
 
 **Policy-Bounded Reinforcement Learning for Autonomous Cyber Resilience**
 
-[Live Environment](https://aditi75432-zero-trust-safe-SRE-gym.hf.space) | [Training Notebook (Colab)](https://colab.research.google.com/drive/1Y_zqkxElx8H0zt8_AnR3vqf93NBT5ncy?usp=sharing) | [HuggingFace Blog Post](HF_Blog.md) | [GitHub Repository](https://github.com/aditi75432/zero-trust-sre-gym)
+[Live Environment](https://huggingface.co/spaces/aditi75432/zero-trust-safe-SRE-gym) | [Training Notebook (Colab)](https://colab.research.google.com/drive/1Y_zqkxElx8H0zt8_AnR3vqf93NBT5ncy?usp=sharing) | [HuggingFace Blog Post](HF_Blog.md) | [GitHub Repository](https://github.com/aditi75432/zero-trust-sre-gym)
 
 ---
 
@@ -471,16 +471,16 @@ Before training, the model consistently attempts to isolate nodes immediately wi
 
 ```
 Baseline Episode 1 | difficulty=warmup | judge=principal
-  Step 1: isolate_node(auth_service) => -50.3
+  Step 1: isolate_node(auth_service) => -20.3
   Total: -50.3 | Resolved: NO
 
 Baseline Episode 2 | difficulty=warmup | judge=junior
   Step 1: file_ticket(hr_db) => -3.3
-  Step 7: isolate_node(api_gateway) => -50.3
+  Step 7: isolate_node(api_gateway) => -20.3
   Total: -56.1 | Resolved: NO
 
 Baseline Episode 3 | difficulty=warmup | judge=principal
-  Step 1: isolate_node(api_gateway) => -50.3
+  Step 1: isolate_node(api_gateway) => -20.3
   Total: -50.3 | Resolved: NO
 ```
 
