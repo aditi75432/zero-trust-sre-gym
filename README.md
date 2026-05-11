@@ -17,6 +17,8 @@ tags:
 
 # Zero Trust SRE Gym
 
+• **Top 100, Meta PyTorch OpenEnv Hackathon 2026**: Selected from 31K+ Teams & 71K+ individuals
+
 **Policy-Bounded Reinforcement Learning for Autonomous Cyber Resilience**
 
 [Live Environment](https://aditi75432-zero-trust-safe-SRE-gym.hf.space) | [Training Notebook (Colab)](https://colab.research.google.com/drive/1Y_zqkxElx8H0zt8_AnR3vqf93NBT5ncy?usp=sharing) | [HuggingFace Blog Post](HF_Blog.md) | [GitHub Repository](https://github.com/aditi75432/zero-trust-sre-gym)
