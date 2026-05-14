@@ -266,7 +266,7 @@ The 87-point spread between a perfect resolution (approximately +35) and a rogue
 **This reward design prevents reward hacking because skipping approval always yields a worse expected return.**
 
 ---
-# ## Live Integration Testing (Proof of Environment)
+# Live Integration Testing (Proof of Environment)
 
 To prove the environment's live mechanics, we run an automated integration test (`test_env.py`) that acts as a client interacting with the live Hugging Face Space API. 
 
