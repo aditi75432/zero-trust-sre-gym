@@ -230,7 +230,7 @@ Verify change board authorization. This step converts a pending ticket into an a
 **Step 4: Isolate Node** (`isolate_node {node}`)
 Execute network quarantine. If `ticket_approved` is false, the policy engine blocks the action, issues -20, and terminates the episode. If approved and the correct node is targeted, the agent receives +20 plus efficiency bonuses.
 
-**Agent Workflow Diagram** (use draw.io):
+**Agent Workflow Diagram**:
 
 
 
