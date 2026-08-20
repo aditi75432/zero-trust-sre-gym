@@ -433,10 +433,12 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
 </style>
 """, unsafe_allow_html=True)
 
+# ─── Configuration ──────────────────────────────────────────────────────────
+# Use the internal backend address (defaults to localhost:8000)
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
 REFRESH_INTERVAL = 5
 
-# ─── SESSION STATE INIT ─────────────────────────────────────────────────────
+# ─── Session state initialisation ──────────────────────────────────────────
 if "judge_vote_log" not in st.session_state:
     st.session_state.judge_vote_log = []
 if "persona_stats" not in st.session_state:
@@ -456,12 +458,12 @@ if "demo_running" not in st.session_state:
     st.session_state.compromised_node = None
     st.session_state.ticket_id = None
 
-# ─── FETCH FUNCTIONS ────────────────────────────────────────────────────────
-
+# ─── Fetch functions ──────────────────────────────────────────────────────
 @st.cache_data(ttl=5)
 def fetch(endpoint):
+    """Fetch data from the FastAPI backend with a timeout."""
     try:
-        r = requests.get(f"{API_URL}/{endpoint}", timeout=3)
+        r = requests.get(f"{API_URL}/{endpoint}", timeout=10)   # increased from 3
         if r.status_code == 200:
             return r.json(), True
     except Exception:
@@ -860,7 +862,7 @@ def compute_kpis(history):
         "avg_reward":    round(sum(h.get("reward", 0) for h in history) / total, 2) if total else 0.0,
     }
 
-# ─── MAIN RENDER ────────────────────────────────────────────────────────────
+# ─── Main render ────────────────────────────────────────────────────────────
 
 # Fetch initial data
 state, ok1 = fetch("state")
@@ -883,7 +885,7 @@ difficulty = curriculum.get("difficulty", "warmup").upper()
 if history:
     update_judge_vote_log(history, command_output, judge_persona, active_ticket_id)
 
-# ─── HEADER WITH DEMO BUTTON ────────────────────────────────────────────────
+# ─── Header with demo button ──────────────────────────────────────────────
 st.markdown('<div style="margin-top: 3rem;">', unsafe_allow_html=True)
 col_title, col_btn = st.columns([3, 1])
 with col_title:
@@ -909,34 +911,32 @@ with col_btn:
             st.session_state.demo_index = 0
             st.session_state.compromised_node = None
             st.session_state.ticket_id = None
-            st.rerun()
+            st.rerun()   # use st.rerun() (not experimental)
     else:
         st.button("Demo in progress...", disabled=True, use_container_width=True)
         st.caption(st.session_state.demo_status)
 st.markdown('</div>', unsafe_allow_html=True)
 
 if not ok1:
-    st.error("Environment server unreachable.")
+    st.error(f"Environment server unreachable. Please check that the backend is running at {API_URL}.")
     st.stop()
 
-# ─── DEMO EXECUTION (if running) ────────────────────────────────────────────
-
+# ─── Demo execution (if running) ──────────────────────────────────────────
 auto = True  # default, will be overridden if demo running
 
 if st.session_state.demo_running:
     auto = False  # disable auto-refresh during demo
 
-    # Initialise actions if not yet set
     if not st.session_state.demo_actions:
         try:
-            # Step 0: Reset the environment
+            # Reset the environment
             requests.post(f"{API_URL}/reset", json={"task_id": "auto"}, timeout=20)
         except requests.exceptions.RequestException as e:
             st.error(f"Could not reach the backend at {API_URL}. Please make sure the FastAPI server is running.\nError: {e}")
             st.session_state.demo_running = False
             st.stop()
 
-        # Build initial query actions (no hardcoded assumption about which node is compromised)
+        # Build the initial query actions (no hardcoded assumption)
         st.session_state.demo_actions = [
             {"tool": "query_siem_logs", "node": "hr_db"},
             {"tool": "query_siem_logs", "node": "payment"},
@@ -959,7 +959,6 @@ if st.session_state.demo_running:
             "payload": {"node": action.get("node", "")},
             "justification": action.get("justification", f"Demo step {idx+1}")
         }
-        # For check_approval, we need the ticket_id (filled dynamically)
         if action["tool"] == "check_approval" and "ticket_id" in action:
             payload["payload"]["ticket_id"] = action["ticket_id"]
 
@@ -971,10 +970,9 @@ if st.session_state.demo_running:
                 obs = data["observation"]
                 reward = data["reward"]["value"]
 
-                # Detect compromised node if we got a positive reward from a SIEM query
+                # Detect compromised node
                 if action["tool"] == "query_siem_logs" and reward > 5:
                     st.session_state.compromised_node = action["node"]
-                    # Append the subsequent workflow actions
                     extra = [
                         {"tool": "file_ticket", "node": action["node"], "justification": f"SIEM evidence confirms compromise on {action['node']}"},
                         {"tool": "check_approval", "ticket_id": "pending"},
@@ -982,15 +980,13 @@ if st.session_state.demo_running:
                     ]
                     st.session_state.demo_actions.extend(extra)
 
-                # If we just filed a ticket, capture the ticket ID
+                # Capture ticket ID after filing
                 if action["tool"] == "file_ticket" and obs.get("active_ticket_id"):
                     st.session_state.ticket_id = obs["active_ticket_id"]
-                    # Update the pending check_approval action with the actual ticket ID
                     for i, a in enumerate(st.session_state.demo_actions):
                         if a["tool"] == "check_approval":
                             st.session_state.demo_actions[i]["ticket_id"] = st.session_state.ticket_id
                             break
-
             else:
                 st.error(f"API returned status {resp.status_code}: {resp.text}")
                 st.session_state.demo_running = False
@@ -1009,18 +1005,17 @@ if st.session_state.demo_running:
             st.session_state.demo_running = False
             st.stop()
 
-        # Advance to the next action
         st.session_state.demo_index += 1
-        # Force UI refresh to show updated panels
-        st.rerun()
+        st.rerun()   # refresh to update all panels
     else:
-        # All actions completed successfully
+        # Demo finished
         st.session_state.demo_running = False
         st.session_state.demo_status = "Demo completed successfully."
         st.success(st.session_state.demo_status)
         auto = False
         st.rerun()
-# ─── SITUATION ROOM ──────────────────────────────────────────────────────────
+
+# ─── Situation Room ────────────────────────────────────────────────────────
 st.markdown("<hr class='row-divider'>", unsafe_allow_html=True)
 st.markdown("<div class='soc-header'>Situation Room</div>", unsafe_allow_html=True)
 
@@ -1046,7 +1041,7 @@ with r1c5:
     st.markdown("<div class='panel-label'>Assigned Judge</div>", unsafe_allow_html=True)
     render_judge_assignment(judge_persona)
 
-# ─── LIVING ENVIRONMENT ──────────────────────────────────────────────────────
+# ─── Living Environment ────────────────────────────────────────────────────
 st.markdown("<hr class='row-divider'>", unsafe_allow_html=True)
 st.markdown("<div class='soc-header'>Living Environment</div>", unsafe_allow_html=True)
 
@@ -1115,7 +1110,7 @@ with r2c3:
         color = "#48bb78" if ticket_approved else "#8da4c0"
         st.markdown(f"<div class='kpi-block'><div class='kpi-value' style='color:{color};font-size:14px;margin-top:4px;'>{tid}</div><div class='kpi-label'>Active Ticket</div></div>", unsafe_allow_html=True)
 
-# ─── JUDGE FEED ──────────────────────────────────────────────────────────────
+# ─── Judge Feed ────────────────────────────────────────────────────────────
 st.markdown("<hr class='row-divider'>", unsafe_allow_html=True)
 st.markdown("<div class='soc-header'>Compliance Judge Feed</div>", unsafe_allow_html=True)
 
@@ -1145,7 +1140,7 @@ with r3c2:
                 unsafe_allow_html=True
             )
 
-# ─── TRAINING EVIDENCE ──────────────────────────────────────────────────────
+# ─── Training Evidence ─────────────────────────────────────────────────────
 st.markdown("<hr class='row-divider'>", unsafe_allow_html=True)
 st.markdown("<div class='soc-header'>Training Evidence</div>", unsafe_allow_html=True)
 
