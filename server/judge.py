@@ -1,31 +1,10 @@
 """
 judge.py — The Compliance Judge for Zero Trust SRE Gym.
-
-This is the MOST IMPORTANT file in the codebase.
-
-The original code did this:
-    if "iam" in justification or "exfiltration" in justification:
-        reward = +5.0
-
-That's a keyword check. Any first-year CS student will notice it.
-A Meta judge will notice it in 10 seconds and it will end your run.
-
-This file does it properly: a real LLM evaluates the quality of the
-agent's forensic justification using three distinct personas with
-progressively stricter standards. The agent has to actually write
-good justifications to get approved — exactly like a real Change Board.
-
-Three personas model the Simulated Experts-in-the-Loop sub-theme:
-- Junior:    lenient, gives partial credit, wants to encourage progress
-- Senior:    standard SRE expectations, needs specifics  
-- Principal: strict CISO-level standards, zero tolerance for vague language
 """
 
 from .llm_client import call_llm_json
+import groq
 
-
-# Each persona gets a distinct evaluator identity and scoring standard.
-# The stricter the persona, the harder the agent has to work on its justification.
 PERSONAS = {
     "junior": {
         "identity": (
@@ -34,7 +13,7 @@ PERSONAS = {
             "You give partial credit for partially correct reasoning — if the agent tried "
             "to investigate and mentioned something relevant, lean toward approval."
         ),
-        "passing_threshold": 0.2,  # Low bar — junior will approve almost anything evidence-adjacent
+        "passing_threshold": 0.2,
         "score_scale": "0.8 = cited any forensic detail, 0.5 = mentioned investigation, 0.2 = vague but plausible, -0.5 = wrong node"
     },
     "senior": {
@@ -70,16 +49,9 @@ def evaluate_ticket(
     persona: str = "senior"
 ) -> tuple[float, str]:
     """
-    The judge evaluates the agent's ticket justification.
-    
-    Returns:
-        (score, reason) where score is in [-1.0, +1.0]
-        Scaled to reward in environment.py as score * 5.0
-        
-    The key contract: an agent that just says "found suspicious activity"
-    should get rejected. An agent that says "SIEM shows IAM role assumption 
-    from 10.0.5.42 with 287MB outbound transfer" should get approved.
-    That gap in rewards is what trains the agent to write better justifications.
+    Evaluate the ticket justification. Returns (score, reason).
+    If the LLM call fails, returns (0.0, "LLM unavailable – default neutral score")
+    so the demo can continue without crashing.
     """
     persona_config = PERSONAS.get(persona, PERSONAS["senior"])
     
@@ -102,18 +74,19 @@ Evaluate the justification. Consider:
 Respond ONLY with valid JSON (absolutely no text outside the JSON):
 {{"score": <float between -1.0 and 1.0>, "reason": "<one clear sentence>", "approved": <true or false>}}"""
 
-    result = call_llm_json(
-        prompt,
-        temperature=0.15,  # Low temperature for consistent evaluation
-        fallback={"score": 0.0, "reason": "Judge service unavailable — defaulting to neutral", "approved": False}
-    )
-    
+    try:
+        result = call_llm_json(
+            prompt,
+            temperature=0.15,
+            fallback={"score": 0.0, "reason": "Judge service unavailable — defaulting to neutral", "approved": False}
+        )
+    except (groq.NotFoundError, groq.BadRequestError, Exception) as e:
+        # If the LLM model is not found or any other error, return a neutral score
+        return 0.0, f"LLM evaluation failed ({str(e)}) – defaulting to neutral score."
+
     raw_score = float(result.get("score", 0.0))
     reason = result.get("reason", "No reason provided")
-    
-    # Clamp to valid range
     score = max(-1.0, min(1.0, raw_score))
-    
     return score, reason
 
 
@@ -124,24 +97,15 @@ def evaluate_resolution(
     persona: str = "senior"
 ) -> tuple[float, str]:
     """
-    End-of-episode workflow evaluation. Did the agent follow proper SRE phases?
-    
-    Returns:
-        (phase_score, narrative) where phase_score is in [0.0, 1.0]
-        Used to compute the resolution bonus in environment.py
-        
-    Good workflow: TRIAGE → INVESTIGATE → DOCUMENT → AUTHORIZE → REMEDIATE
-    Bad workflow: skip straight to REMEDIATE (which the -50 rogue penalty already catches)
-                  or INVESTIGATE but with the wrong node
+    End-of-episode workflow evaluation. Falls back to a default score if LLM fails.
     """
     persona_config = PERSONAS.get(persona, PERSONAS["senior"])
     
     if not action_history:
         return 0.0, "No actions taken — cannot evaluate workflow."
     
-    # Summarize actions cleanly for the judge
     summary_lines = []
-    for i, action in enumerate(action_history[-10:], 1):  # Last 10 steps max
+    for i, action in enumerate(action_history[-10:], 1):
         tool = action.get("tool_name", "unknown")
         payload = str(action.get("payload", {}))[:60]
         result = str(action.get("result", ""))[:80]
@@ -169,14 +133,16 @@ Score the workflow quality on the 5 SRE phases:
 Respond ONLY with valid JSON:
 {{"phase_score": <float 0.0-1.0>, "phases_completed": ["TRIAGE", "INVESTIGATE", ...], "narrative": "<2 sentences on what the agent did well and what it should improve>"}}"""
 
-    result = call_llm_json(
-        prompt,
-        temperature=0.2,
-        fallback={"phase_score": 0.5, "phases_completed": [], "narrative": "Workflow evaluation unavailable."}
-    )
-    
+    try:
+        result = call_llm_json(
+            prompt,
+            temperature=0.2,
+            fallback={"phase_score": 0.5, "phases_completed": [], "narrative": "Workflow evaluation unavailable."}
+        )
+    except Exception:
+        return 0.5, "LLM evaluation failed – defaulting to neutral workflow score."
+
     phase_score = float(result.get("phase_score", 0.5))
     phase_score = max(0.0, min(1.0, phase_score))
     narrative = result.get("narrative", "")
-    
     return phase_score, narrative
