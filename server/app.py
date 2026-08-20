@@ -1,4 +1,5 @@
 import json
+import traceback
 import requests as _req
 from fastapi import FastAPI, HTTPException
 from .models import Action, Observation, TaskRequest
@@ -62,7 +63,14 @@ def take_step(action: Action):
             detail="Environment not initialized. Call POST /reset first.",
         )
 
-    result = env.step(action)
+    try:
+        result = env.step(action)
+    except Exception as e:
+        # Log the full traceback to the container logs
+        print("ERROR in /step:")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error during step: {str(e)}")
+
     obs = result.observation
     reward = result.reward
     terminated = result.terminated
@@ -81,11 +89,12 @@ def take_step(action: Action):
     return {
         "observation": obs.model_dump(),
         "reward":      reward.model_dump(),
-        "terminated":  terminated,              # OpenEnv Validator
-        "truncated":   truncated,               # OpenEnv Validator
-        "done":        terminated or truncated, # My Notebook
+        "terminated":  terminated,
+        "truncated":   truncated,
+        "done":        terminated or truncated,
         "info":        info,
     }
+
 @app.get("/history")
 def get_history():
     return {
@@ -140,7 +149,6 @@ def get_service_logs(service: str):
 
 def main():
     import uvicorn
-   
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 if __name__ == "__main__":

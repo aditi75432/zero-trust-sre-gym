@@ -3,6 +3,14 @@ import requests
 import time
 from .llm_client import call_llm_json
 
+# List of Groq models to try (free tier accessible)
+FALLBACK_MODELS = [
+    "llama-3.1-8b-instant",   # primary
+    "llama3-70b-8192",        # fallback 1
+    "llama3-8b-8192",         # fallback 2
+    "mixtral-8x7b-32768",     # fallback 3
+]
+
 def fetch_live_threat_intel() -> str:
     url = "https://cve.circl.lu/api/last"
     for attempt in range(3):
@@ -82,7 +90,6 @@ def generate_scenario(weakness_profile: dict, difficulty: str = "intermediate") 
             return _normalize(scenario, difficulty)
     except Exception as e:
         print(f"[AdversarialDesigner] LLM generation failed ({type(e).__name__}: {e}). Using static pool.")
-    
     return _normalize(_static_pick(difficulty), difficulty)
 
 
@@ -122,12 +129,23 @@ Respond ONLY with valid JSON, no surrounding text:
   "difficulty_description": "One sentence describing the CVE and attack vector"
 }}"""
 
-    scenario = call_llm_json(prompt, 
-                         temperature=0.7, 
-                         model="llama-3.1-8b-instant",
-                         )
-    scenario["cve_context"] = live_cve_context
-    return scenario
+    # Try each model in order until one works
+    last_error = None
+    for model in FALLBACK_MODELS:
+        try:
+            scenario = call_llm_json(
+                prompt,
+                temperature=0.7,
+                model=model,
+            )
+            scenario["cve_context"] = live_cve_context
+            return scenario
+        except Exception as e:
+            last_error = e
+            print(f"[AdversarialDesigner] Model {model} failed: {e}")
+            continue
+    # If all models fail, raise the last error
+    raise last_error
 
 
 def _static_pick(difficulty: str) -> dict:
@@ -163,10 +181,10 @@ def _normalize(raw: dict, difficulty: str = "unknown") -> dict:
         "threat_ips": raw_ips[:len(valid_nodes)],
         "iam_roles": raw_roles[:len(valid_nodes)],
         "red_herring_nodes": red_herrings,
-        "siem_evidence_template": raw.get(
+        "siem_evidence_template": str(raw.get(
             "siem_evidence_template",
             "Unauthorized IAM role assumption. Source IP {ip}. Role {role} active outside policy. Data transfer anomaly detected."
-        ),
+        )),
         "difficulty_description": raw.get("difficulty_description", f"{difficulty} security incident"),
-        "cve_context": raw.get("cve_context","{difficulty} security incident")
+        "cve_context": str(raw.get("cve_context", "N/A"))
     }

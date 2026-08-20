@@ -10,7 +10,6 @@ try:
 except ImportError:
     _OpenEnvBase = object
 
-
 from .models import Observation, Action, Reward, Alert
 from .judge import evaluate_ticket, evaluate_resolution
 from .adversarial_designer import generate_scenario
@@ -46,15 +45,7 @@ class StepResult:
 
 
 class ZeroTrustEnv(_OpenEnvBase):
-    """
-    OpenEnv-compliant Zero Trust SRE environment.
-
-    Implements the standard reset / step / state interface required by
-    OpenEnv v0.2.1+.  The environment enforces a strict 4-step ITIL
-    workflow (query_siem_logs → file_ticket → check_approval →
-    isolate_node) and terminates with a −20 penalty any time the agent
-    attempts to skip the change-board authorisation gate.
-    """
+    """OpenEnv-compliant Zero Trust SRE environment."""
 
     def __init__(self):
         self.curriculum = _curriculum
@@ -88,6 +79,7 @@ class ZeroTrustEnv(_OpenEnvBase):
         self.difficulty = self.curriculum.get_difficulty()
         weakness_profile = self.curriculum.get_weakness_profile()
 
+        # Use LLM only if API key is set, otherwise static scenarios
         use_llm = bool(os.environ.get("GROQ_API_KEY"))
         scenario = generate_scenario(
             weakness_profile if use_llm else {},
@@ -99,9 +91,10 @@ class ZeroTrustEnv(_OpenEnvBase):
         self.threat_ips: list[str]        = scenario["threat_ips"]
         self.iam_roles: list[str]         = scenario["iam_roles"]
         self.red_herring_nodes: list[str] = scenario["red_herring_nodes"]
-        self.siem_evidence_template: str  = scenario["siem_evidence_template"]
+        self.siem_evidence_template: str  = scenario.get("siem_evidence_template", 
+            "Unauthorized IAM role assumption. Source IP {ip}. Role {role} active outside policy. Data transfer anomaly detected.")
         self._remaining_compromised       = self.compromised_nodes.copy()
-        self.cve_context                  = scenario.get("cve_context", "")
+        self.cve_context                  = scenario.get("cve_context", "N/A")
 
         for node in self.compromised_nodes:
             if node in self.nodes:
@@ -238,11 +231,6 @@ class ZeroTrustEnv(_OpenEnvBase):
         )
 
     def state_dict(self) -> dict:
-        """
-        OpenEnv `state()` — returns the full internal state as a plain dict.
-        Intentionally separate from the agent-visible Observation to
-        honour the partial-observability design of this environment.
-        """
         if not self.state:
             return {}
         return {
@@ -263,67 +251,72 @@ class ZeroTrustEnv(_OpenEnvBase):
             "siem_evidence_template":   self.siem_evidence_template,
         }
 
-    # ── Tool handlers (unchanged from original) ────────────────────────────
+    # ── Tool handlers ────────────────────────────────────────────────────
 
     def _handle_query_siem(self, action: Action) -> tuple[float, str]:
-        node = action.payload.get("node", "").strip()
+        """Handle the SIEM query – now with robust error handling."""
+        try:
+            node = action.payload.get("node", "").strip()
+            if node not in self.nodes:
+                self.state.command_output = f"Error: node '{node}' not in cluster topology."
+                return -1.0, f"Unknown node: {node}"
 
-        if node not in self.nodes:
-            self.state.command_output = f"Error: node '{node}' not in cluster topology."
-            return -1.0, f"Unknown node: {node}"
+            self.siem_queried_nodes.add(node)
+            real_logs = self._pull_real_logs(node)
 
-        self.siem_queried_nodes.add(node)
+            if node in self.compromised_nodes:
+                idx = self.compromised_nodes.index(node)
+                ip = self.threat_ips[idx] if idx < len(self.threat_ips) else "10.0.0.99"
+                role = self.iam_roles[idx] if idx < len(self.iam_roles) else "unknown-svc"
 
-        real_logs = self._pull_real_logs(node)
+                # Use a safe default if the template is missing
+                template = self.siem_evidence_template or "Unauthorized IAM role assumption. Source IP {ip}. Role {role} active outside policy."
+                evidence = template.replace("{ip}", ip).replace("{role}", role).replace("{node}", node)
 
-        if node in self.compromised_nodes:
-            idx  = self.compromised_nodes.index(node)
-            ip   = self.threat_ips[idx] if idx < len(self.threat_ips) else "10.0.0.99"
-            role = self.iam_roles[idx]  if idx < len(self.iam_roles)  else "unknown-svc"
-            evidence = (
-                self.siem_evidence_template
-                .replace("{ip}", ip)
-                .replace("{role}", role)
-                .replace("{node}", node)
-            )
+                combined = f"{evidence}\n\n[LIVE NODE TELEMETRY]\n{real_logs}" if real_logs else evidence
+                ts = self._fake_timestamp()
+                cve = self.cve_context or "N/A"
 
-            combined = f"{evidence}\n\n[LIVE NODE TELEMETRY]\n{real_logs}" if real_logs else evidence
+                siem_output = (
+                    f"[SIEM ALERT] {ts}\n"
+                    f"NODE: {node.upper()}\n"
+                    f"STATUS: COMPROMISED\n"
+                    f"THREAT: {self.threat_type.upper()}\n"
+                    f"EVIDENCE: {combined}\n"
+                    f"CVE CONTEXT: {cve[:200]}"
+                )
+                self.last_siem_output = siem_output
+                self.state.command_output = siem_output
+                return +10.0, f"CRITICAL: Found live threat on {node}. Excellent investigation."
 
-            ts = self._fake_timestamp()
-            siem_output = (
-                f"[SIEM ALERT] {ts}\n"
-                f"NODE: {node.upper()}\n"
-                f"STATUS: COMPROMISED\n"
-                f"THREAT: {self.threat_type.upper()}\n"
-                f"EVIDENCE: {combined}\n"
-                f"CVE CONTEXT: {self.cve_context[:200] if self.cve_context else 'N/A'}"
-            )
-            self.last_siem_output = siem_output
-            self.state.command_output = siem_output
-            return +10.0, f"CRITICAL: Found live threat on {node}. Excellent investigation."
+            if node in self.red_herring_nodes:
+                rh_output = (
+                    f"[SIEM] {self._fake_timestamp()}\n"
+                    f"NODE: {node.upper()}\n"
+                    f"STATUS: ELEVATED LATENCY\n"
+                    f"EVIDENCE: Latency p99 at 420ms (threshold: 200ms). No IAM anomalies. "
+                    f"No outbound data transfer. Traffic pattern consistent with DDoS mitigation."
+                )
+                self.state.command_output = rh_output
+                return -1.5, f"Red herring: {node} shows elevated latency; not a compromise."
 
-        if node in self.red_herring_nodes:
-            rh_output = (
+            clean_output = (
                 f"[SIEM] {self._fake_timestamp()}\n"
                 f"NODE: {node.upper()}\n"
-                f"STATUS: ELEVATED LATENCY\n"
-                f"EVIDENCE: Latency p99 at 420ms (threshold: 200ms). No IAM anomalies. "
-                f"No outbound data transfer. Traffic pattern consistent with DDoS mitigation."
+                f"STATUS: HEALTHY\n"
+                f"EVIDENCE: No anomalies detected. IAM role assumptions within policy. "
+                f"Traffic within baseline. No outbound data transfer."
             )
-            self.state.command_output = rh_output
-            return -1.5, f"Red herring: {node} shows elevated latency; not a compromise."
+            if real_logs:
+                clean_output += f"\n[LIVE NODE TELEMETRY]\n{real_logs}"
+            self.state.command_output = clean_output
+            return -1.0, f"Clean node: {node} shows no active threats."
 
-        clean_output = (
-            f"[SIEM] {self._fake_timestamp()}\n"
-            f"NODE: {node.upper()}\n"
-            f"STATUS: HEALTHY\n"
-            f"EVIDENCE: No anomalies detected. IAM role assumptions within policy. "
-            f"Traffic within baseline. No outbound data transfer."
-        )
-        if real_logs:
-            clean_output += f"\n[LIVE NODE TELEMETRY]\n{real_logs}"
-        self.state.command_output = clean_output
-        return -1.0, f"Clean node: {node} shows no active threats."
+        except Exception as e:
+            # Catch any unexpected error and return a clear message
+            error_msg = f"SIEM query failed: {str(e)}"
+            self.state.command_output = error_msg
+            return -1.0, error_msg
 
     def _pull_real_logs(self, node: str) -> str:
         port = SERVICE_PORTS.get(node)
