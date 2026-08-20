@@ -5,6 +5,7 @@ from .llm_client import call_llm_json
 
 # List of Groq models to try (free tier accessible)
 FALLBACK_MODELS = [
+    "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",   # primary
     "llama3-70b-8192",        # fallback 1
     "llama3-8b-8192",         # fallback 2
