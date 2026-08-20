@@ -2,7 +2,7 @@
 llm_client.py — Groq API wrapper for the Zero Trust SRE Gym.
 
 Why Groq specifically: it's free-tier friendly, fast enough for real-time
-episode stepping (sub-second latency on llama-3.1-8b-instant), and the
+episode stepping (sub-second latency on llama-3.3-70b-versatile), and the
 OpenAI-compatible interface makes it trivial to swap models.
 
 All LLM calls go through here so we have one place to swap providers,
@@ -14,10 +14,14 @@ import re
 import json
 from groq import Groq
 
+# Default model – can be overridden by environment variable GROQ_MODEL
+DEFAULT_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+
 _client = None
 
 
 def get_client() -> Groq:
+    """Lazy singleton — only initializes when first called."""
     global _client
     if _client is None:
         api_key = os.environ.get("GROQ_API_KEY")
@@ -26,13 +30,14 @@ def get_client() -> Groq:
                 "GROQ_API_KEY environment variable is not set. "
                 "Get a free key at console.groq.com and export it before running."
             )
-        _client = Groq(api_key=api_key, timeout=30.0)  # Add timeout here
+        # Set a reasonable timeout to avoid hanging
+        _client = Groq(api_key=api_key, timeout=30.0)
     return _client
 
 
 def call_llm(
     prompt: str,
-    model: str = "llama-3.1-8b-instant",
+    model: str = None,
     temperature: float = 0.3,
     max_tokens: int = 512,
     system: str = None
@@ -41,10 +46,13 @@ def call_llm(
     Raw LLM call. Returns the text response string.
     
     Model choices and tradeoffs:
-    - llama-3.1-8b-instant: fastest, free tier, good for judge + designer
-    - llama-3.3-70b-versatile: higher quality, slower, use for complex scenarios
+    - llama-3.3-70b-versatile: highest quality, good speed
+    - llama-3.1-8b-instant: fastest, but may be restricted on free tier
     - gemma2-9b-it: good middle ground, very fast
     """
+    if model is None:
+        model = DEFAULT_MODEL
+
     client = get_client()
     
     messages = []
@@ -64,7 +72,7 @@ def call_llm(
 
 def call_llm_json(
     prompt: str,
-    model: str = "llama-3.1-8b-instant",
+    model: str = None,
     temperature: float = 0.2,
     fallback: dict = None
 ) -> dict:
@@ -76,6 +84,9 @@ def call_llm_json(
     
     If parsing fails completely, returns fallback dict if provided, else raises.
     """
+    if model is None:
+        model = DEFAULT_MODEL
+
     raw = call_llm(prompt, model=model, temperature=temperature)
     
     # Strip markdown code fences
