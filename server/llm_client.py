@@ -18,7 +18,6 @@ _client = None
 
 
 def get_client() -> Groq:
-    """Lazy singleton — only initializes when first called."""
     global _client
     if _client is None:
         api_key = os.environ.get("GROQ_API_KEY")
@@ -27,7 +26,7 @@ def get_client() -> Groq:
                 "GROQ_API_KEY environment variable is not set. "
                 "Get a free key at console.groq.com and export it before running."
             )
-        _client = Groq(api_key=api_key)
+        _client = Groq(api_key=api_key, timeout=30.0)  # Add timeout here
     return _client
 
 

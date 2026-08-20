@@ -5,23 +5,18 @@ set -e
 echo "[START] Zero Trust SRE Gym — Enterprise Security RL Environment"
 echo "[START] Launching microservice layer..."
 
-pip install flask --quiet 2>/dev/null || true
-
-# Start services with nohup so HF doesn't kill them
-nohup python frontend_service.py > frontend.log 2>&1 &
+# Start services in background
+python frontend_service.py &
 FRONTEND_PID=$!
-
-nohup python payment_service.py > payment.log 2>&1 &
+python payment_service.py &
 PAYMENT_PID=$!
-
-nohup python hr_db_service.py > hr.log 2>&1 &
+python hr_db_service.py &
 HRDB_PID=$!
 
 echo "[START] Waiting for microservices to initialise..."
 sleep 8
 
 echo "[START] Checking service health..."
-
 for port in 5003 5004 5005; do
     for attempt in 1 2 3 4 5; do
         if curl -s "http://localhost:${port}/health" > /dev/null 2>&1; then
@@ -34,9 +29,18 @@ for port in 5003 5004 5005; do
 done
 
 echo "[START] Microservice layer ready."
-echo "[START] Starting Zero Trust Gym API on port 7860..."
 
-uvicorn server.app:app --host 0.0.0.0 --port 7860
+# Start FastAPI backend on port 8000 (internal)
+echo "[START] Starting FastAPI backend on port 8000..."
+uvicorn server.app:app --host 0.0.0.0 --port 8000 &
+API_PID=$!
 
-# Keep processes alive
-wait $FRONTEND_PID $PAYMENT_PID $HRDB_PID
+# Wait a moment for FastAPI to start
+sleep 2
+
+# Start Streamlit dashboard on the public port 7860
+echo "[START] Starting Streamlit dashboard on port 7860..."
+streamlit run dashboard.py --server.port 7860 --server.address 0.0.0.0
+
+# Keep all processes alive
+wait $FRONTEND_PID $PAYMENT_PID $HRDB_PID $API_PID

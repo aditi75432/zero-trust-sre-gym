@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import requests
 import networkx as nx
@@ -9,6 +10,7 @@ from datetime import datetime
 
 st.set_page_config(layout="wide", page_title="Zero Trust SRE Gym", page_icon=None)
 
+# ─── CSS (with fixed heading colours) ──────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
@@ -400,16 +402,16 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
 
 .title-main {
     font-family: 'IBM Plex Sans', sans-serif;
-    font-size: 20px;
-    font-weight: 600;
-    color: #8da4c0;
+    font-size: 28px;
+    font-weight: 700;
+    color: #e2e8f0;
     letter-spacing: 0.5px;
 }
 
 .title-sub {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #2d4a6e;
+    font-size: 12px;
+    color: #60a5fa;
     letter-spacing: 2px;
     text-transform: uppercase;
     margin-top: 2px;
@@ -431,9 +433,10 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
 </style>
 """, unsafe_allow_html=True)
 
-API_URL = "https://aditi75432-zero-trust-safe-SRE-gym.hf.space"
+API_URL = os.environ.get("API_URL", "http://localhost:8000")
 REFRESH_INTERVAL = 5
 
+# ─── SESSION STATE INIT ─────────────────────────────────────────────────────
 if "judge_vote_log" not in st.session_state:
     st.session_state.judge_vote_log = []
 if "persona_stats" not in st.session_state:
@@ -443,6 +446,17 @@ if "last_ticket_action" not in st.session_state:
 if "episode_results" not in st.session_state:
     st.session_state.episode_results = []
 
+# Demo state
+if "demo_running" not in st.session_state:
+    st.session_state.demo_running = False
+    st.session_state.demo_step = 0
+    st.session_state.demo_actions = []
+    st.session_state.demo_status = ""
+    st.session_state.demo_index = 0
+    st.session_state.compromised_node = None
+    st.session_state.ticket_id = None
+
+# ─── FETCH FUNCTIONS ────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=5)
 def fetch(endpoint):
@@ -453,7 +467,6 @@ def fetch(endpoint):
     except Exception:
         pass
     return {}, False
-
 
 def build_graph(nodes):
     G = nx.DiGraph()
@@ -471,14 +484,11 @@ def build_graph(nodes):
             G.add_edge(*e)
     return G
 
-
 def draw_topology(nodes_state):
     if not nodes_state:
         return go.Figure()
-
     nodes = list(nodes_state.keys())
     G = build_graph(nodes)
-
     fixed_pos = {
         "api_gateway":  (-0.6, 0.8),
         "auth_service": (0.6, 0.8),
@@ -487,7 +497,6 @@ def draw_topology(nodes_state):
         "hr_db":        (0.0, -0.8),
     }
     pos = {n: fixed_pos.get(n, (0, 0)) for n in G.nodes()}
-
     status_colors = {
         "healthy":     "#2f855a",
         "compromised": "#c53030",
@@ -495,9 +504,7 @@ def draw_topology(nodes_state):
         "offline":     "#2d3748",
     }
     protected = {"api_gateway", "auth_service"}
-
-    edge_x, edge_y = [], []
-    edge_colors = []
+    edge_x, edge_y, edge_colors = [], [], []
     for e in G.edges():
         x0, y0 = pos[e[0]]
         x1, y1 = pos[e[1]]
@@ -506,14 +513,12 @@ def draw_topology(nodes_state):
         edge_x += [x0, x1, None]
         edge_y += [y0, y1, None]
         edge_colors.append(color)
-
     edge_trace = go.Scatter(
         x=edge_x, y=edge_y,
         mode="lines",
         line=dict(width=1.5, color="#1a2d42"),
         hoverinfo="none"
     )
-
     node_x, node_y, colors, labels, hover_texts, sizes, symbols = [], [], [], [], [], [], []
     for n in G.nodes():
         x, y = pos[n]
@@ -531,7 +536,6 @@ def draw_topology(nodes_state):
         )
         sizes.append(20 if is_protected else 16)
         symbols.append("diamond" if is_protected else "circle")
-
     node_trace = go.Scatter(
         x=node_x, y=node_y,
         mode="markers+text",
@@ -547,7 +551,6 @@ def draw_topology(nodes_state):
             line=dict(width=1.5, color="#0b1018"),
         )
     )
-
     fig = go.Figure(data=[edge_trace, node_trace])
     fig.update_layout(
         showlegend=False,
@@ -560,7 +563,6 @@ def draw_topology(nodes_state):
     )
     return fig
 
-
 def draw_reward_curve(history):
     if not history:
         fig = go.Figure()
@@ -571,11 +573,9 @@ def draw_reward_curve(history):
             margin=dict(l=40, r=20, t=20, b=40),
         )
         return fig
-
     df = pd.DataFrame(history)
     rewards = df["cumulative_reward"].values
     steps = df["step"].values
-
     window = max(3, len(rewards) // 8)
     if len(rewards) >= window:
         rolling = np.convolve(rewards, np.ones(window) / window, mode="valid")
@@ -583,15 +583,12 @@ def draw_reward_curve(history):
     else:
         rolling = rewards
         roll_steps = steps
-
     fig = go.Figure()
-
     fig.add_hrect(y0=-25, y1=0, fillcolor="rgba(197,48,48,0.04)", line_width=0)
     fig.add_hline(y=-20.0, line_dash="dot", line_color="#c53030", line_width=1,
                   annotation_text="Policy Violation Floor (-20)", annotation_font_size=9,
                   annotation_font_color="#c53030", annotation_position="bottom right")
     fig.add_hline(y=0, line_dash="dot", line_color="#2d4a6e", line_width=1)
-
     fig.add_trace(go.Scatter(
         x=steps, y=rewards,
         mode="lines",
@@ -606,7 +603,6 @@ def draw_reward_curve(history):
         name="Rolling mean",
         showlegend=False,
     ))
-
     fig.update_layout(
         plot_bgcolor="#080c10",
         paper_bgcolor="#080c10",
@@ -617,12 +613,10 @@ def draw_reward_curve(history):
     )
     return fig
 
-
 def draw_persona_chart(persona_stats):
     personas = ["junior", "senior", "principal"]
     approved = [persona_stats[p]["approved"] for p in personas]
     rejected = [persona_stats[p]["rejected"] for p in personas]
-
     fig = go.Figure()
     fig.add_trace(go.Bar(
         name="Approved", x=personas, y=approved,
@@ -644,7 +638,6 @@ def draw_persona_chart(persona_stats):
     )
     return fig
 
-
 def led_for_status(status):
     if status == "compromised":
         return "<span class='led-fatal'></span>"
@@ -654,7 +647,6 @@ def led_for_status(status):
         return "<span class='led-clean'></span>"
     return "<span class='led-warning'></span>"
 
-
 def render_alert_leds(nodes_state, alerts):
     node_severity = {}
     for a in alerts:
@@ -663,7 +655,6 @@ def render_alert_leds(nodes_state, alerts):
             node_severity[n] = "FATAL"
         elif n not in node_severity:
             node_severity[n] = "WARNING"
-
     html_parts = []
     for node, info in nodes_state.items():
         status = info.get("status", "unknown")
@@ -675,13 +666,11 @@ def render_alert_leds(nodes_state, alerts):
             alert_badge = "<span style='font-family:JetBrains Mono;font-size:9px;color:#d69e2e;background:#1a1400;padding:1px 5px;border-radius:2px;margin-left:4px;'>WARN</span>"
         else:
             alert_badge = ""
-
         html_parts.append(
             f"<div class='led-row'>{led}<span class='led-node-name'>{node}</span>"
             f"<span class='led-status-text'>{status.upper()}</span>{alert_badge}</div>"
         )
     st.markdown("".join(html_parts), unsafe_allow_html=True)
-
 
 def render_policy_status(command_output):
     is_blocked = "ACCESS DENIED" in command_output or "POLICY BLOCK" in command_output or "ROGUE" in command_output.upper()
@@ -708,20 +697,17 @@ def render_policy_status(command_output):
             unsafe_allow_html=True
         )
 
-
 def render_ticket_workflow(active_ticket_id, ticket_approved, command_output):
     investigated = "SIEM ALERT" in command_output or "query_siem" in command_output.lower() or "STATUS: COMPROMISED" in command_output
     ticket_filed = active_ticket_id is not None
     approved = ticket_approved
     isolated = "ALL THREATS NEUTRALIZED" in command_output or "isolated" in command_output.lower()
-
     steps = [
         ("INVESTIGATE",   investigated),
         ("FILE TICKET",   ticket_filed),
         ("AUTHORIZED",    approved),
         ("ISOLATE",       isolated),
     ]
-
     parts = []
     for i, (label, done) in enumerate(steps):
         dot_class = "step-dot-done" if done else "step-dot-pending"
@@ -729,9 +715,7 @@ def render_ticket_workflow(active_ticket_id, ticket_approved, command_output):
         parts.append(f"<div class='workflow-step {text_class}'><div class='{dot_class}'></div>{label}</div>")
         if i < len(steps) - 1:
             parts.append("<div class='step-connector'></div>")
-
     st.markdown("".join(parts), unsafe_allow_html=True)
-
 
 def render_cve_feed(cve_context):
     if not cve_context or cve_context == "N/A":
@@ -754,7 +738,6 @@ def render_cve_feed(cve_context):
         unsafe_allow_html=True
     )
 
-
 def render_judge_assignment(judge_persona):
     persona_descriptions = {
         "junior":    ("JUNIOR SRE", "#d69e2e", "Lenient evaluation. Rewards investigative effort. Approves on partial evidence.", "#1a1400"),
@@ -770,7 +753,6 @@ def render_judge_assignment(judge_persona):
         unsafe_allow_html=True
     )
 
-
 def render_siem_terminal(command_output):
     display = command_output if command_output else "Awaiting agent action..."
     safe = display.replace("<", "&lt;").replace(">", "&gt;")
@@ -778,7 +760,6 @@ def render_siem_terminal(command_output):
         f"<div class='siem-terminal'>{safe}<span class='siem-cursor'></span></div>",
         unsafe_allow_html=True
     )
-
 
 def render_audit_trail(history):
     if not history:
@@ -811,7 +792,6 @@ def render_audit_trail(history):
         )
     st.markdown("".join(rows_html), unsafe_allow_html=True)
 
-
 def update_judge_vote_log(history, command_output, judge_persona, active_ticket_id):
     if not history:
         return
@@ -840,7 +820,6 @@ def update_judge_vote_log(history, command_output, judge_persona, active_ticket_
                 else:
                     st.session_state.persona_stats[judge_persona]["rejected"] += 1
 
-
 def render_judge_vote_log():
     if not st.session_state.judge_vote_log:
         st.markdown("<div style='font-family:JetBrains Mono;font-size:10px;color:#2d4a6e;padding:8px;'>No ticket evaluations yet.</div>", unsafe_allow_html=True)
@@ -867,16 +846,13 @@ def render_judge_vote_log():
             unsafe_allow_html=True
         )
 
-
 def compute_kpis(history):
     if not history:
         return {"success_rate": 0.0, "violation_rate": 0.0, "avg_steps": 0.0, "valid_json": 0.0, "avg_reward": 0.0}
-
     violation_actions = ["isolate_node"]
     violations = sum(1 for h in history if h.get("reward", 0) <= -15)
     total = len(history)
     positive = sum(1 for h in history if h.get("reward", 0) > 5)
-
     return {
         "success_rate":  round(positive / total * 100, 1) if total else 0.0,
         "violation_rate": round(violations / total * 100, 1) if total else 0.0,
@@ -884,7 +860,9 @@ def compute_kpis(history):
         "avg_reward":    round(sum(h.get("reward", 0) for h in history) / total, 2) if total else 0.0,
     }
 
+# ─── MAIN RENDER ────────────────────────────────────────────────────────────
 
+# Fetch initial data
 state, ok1 = fetch("state")
 history_data, ok2 = fetch("history")
 services, ok3 = fetch("services")
@@ -905,23 +883,144 @@ difficulty = curriculum.get("difficulty", "warmup").upper()
 if history:
     update_judge_vote_log(history, command_output, judge_persona, active_ticket_id)
 
-st.markdown(
-    f"<div style='display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:16px;'>"
-    f"<div>"
-    f"<div class='title-main'>Zero Trust SRE Gym</div>"
-    f"<div class='title-sub'>Enterprise Security Operations Centre / Autonomous Containment Agent</div>"
-    f"</div>"
-    f"<div style='font-family:JetBrains Mono;font-size:10px;color:#2d4a6e;'>"
-    f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}"
-    f"</div>"
-    f"</div>",
-    unsafe_allow_html=True
-)
+# ─── HEADER WITH DEMO BUTTON ────────────────────────────────────────────────
+st.markdown('<div style="margin-top: 3rem;">', unsafe_allow_html=True)
+col_title, col_btn = st.columns([3, 1])
+with col_title:
+    st.markdown(
+        f"""
+        <div>
+            <div class='title-main'>Zero Trust SRE Gym</div>
+            <div class='title-sub'>Enterprise Security Operations Centre / Autonomous Containment Agent</div>
+            <div style='font-family:JetBrains Mono;font-size:10px;color:#2d4a6e;margin-top:4px;'>
+                {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+with col_btn:
+    if not st.session_state.demo_running:
+        if st.button("Run Live Demo", type="primary", use_container_width=True):
+            st.session_state.demo_running = True
+            st.session_state.demo_step = 0
+            st.session_state.demo_actions = []
+            st.session_state.demo_status = "Starting demo..."
+            st.session_state.demo_index = 0
+            st.session_state.compromised_node = None
+            st.session_state.ticket_id = None
+            st.rerun()
+    else:
+        st.button("Demo in progress...", disabled=True, use_container_width=True)
+        st.caption(st.session_state.demo_status)
+st.markdown('</div>', unsafe_allow_html=True)
 
 if not ok1:
     st.error("Environment server unreachable.")
     st.stop()
 
+# ─── DEMO EXECUTION (if running) ────────────────────────────────────────────
+
+auto = True  # default, will be overridden if demo running
+
+if st.session_state.demo_running:
+    auto = False  # disable auto-refresh during demo
+
+    # Initialise actions if not yet set
+    if not st.session_state.demo_actions:
+        try:
+            # Step 0: Reset the environment
+            requests.post(f"{API_URL}/reset", json={"task_id": "auto"}, timeout=20)
+        except requests.exceptions.RequestException as e:
+            st.error(f"Could not reach the backend at {API_URL}. Please make sure the FastAPI server is running.\nError: {e}")
+            st.session_state.demo_running = False
+            st.stop()
+
+        # Build initial query actions (no hardcoded assumption about which node is compromised)
+        st.session_state.demo_actions = [
+            {"tool": "query_siem_logs", "node": "hr_db"},
+            {"tool": "query_siem_logs", "node": "payment"},
+            {"tool": "query_siem_logs", "node": "frontend"},
+        ]
+        st.session_state.demo_index = 0
+        st.session_state.compromised_node = None
+        st.session_state.ticket_id = None
+
+    idx = st.session_state.demo_index
+    actions = st.session_state.demo_actions
+
+    if idx < len(actions):
+        action = actions[idx]
+        st.session_state.demo_status = f"Executing: {action['tool']} on {action.get('node', 'N/A')}"
+
+        # Build the payload for this step
+        payload = {
+            "tool_name": action["tool"],
+            "payload": {"node": action.get("node", "")},
+            "justification": action.get("justification", f"Demo step {idx+1}")
+        }
+        # For check_approval, we need the ticket_id (filled dynamically)
+        if action["tool"] == "check_approval" and "ticket_id" in action:
+            payload["payload"]["ticket_id"] = action["ticket_id"]
+
+        # Execute the step with error handling
+        try:
+            resp = requests.post(f"{API_URL}/step", json=payload, timeout=20)
+            if resp.status_code == 200:
+                data = resp.json()
+                obs = data["observation"]
+                reward = data["reward"]["value"]
+
+                # Detect compromised node if we got a positive reward from a SIEM query
+                if action["tool"] == "query_siem_logs" and reward > 5:
+                    st.session_state.compromised_node = action["node"]
+                    # Append the subsequent workflow actions
+                    extra = [
+                        {"tool": "file_ticket", "node": action["node"], "justification": f"SIEM evidence confirms compromise on {action['node']}"},
+                        {"tool": "check_approval", "ticket_id": "pending"},
+                        {"tool": "isolate_node", "node": action["node"]}
+                    ]
+                    st.session_state.demo_actions.extend(extra)
+
+                # If we just filed a ticket, capture the ticket ID
+                if action["tool"] == "file_ticket" and obs.get("active_ticket_id"):
+                    st.session_state.ticket_id = obs["active_ticket_id"]
+                    # Update the pending check_approval action with the actual ticket ID
+                    for i, a in enumerate(st.session_state.demo_actions):
+                        if a["tool"] == "check_approval":
+                            st.session_state.demo_actions[i]["ticket_id"] = st.session_state.ticket_id
+                            break
+
+            else:
+                st.error(f"API returned status {resp.status_code}: {resp.text}")
+                st.session_state.demo_running = False
+                st.stop()
+
+        except requests.exceptions.ReadTimeout:
+            st.error("The backend took too long to respond. Please check that the FastAPI server is running and not overloaded.")
+            st.session_state.demo_running = False
+            st.stop()
+        except requests.exceptions.ConnectionError:
+            st.error(f"Cannot connect to the backend at {API_URL}. Make sure the FastAPI server is running.")
+            st.session_state.demo_running = False
+            st.stop()
+        except requests.exceptions.RequestException as e:
+            st.error(f"Backend error: {e}")
+            st.session_state.demo_running = False
+            st.stop()
+
+        # Advance to the next action
+        st.session_state.demo_index += 1
+        # Force UI refresh to show updated panels
+        st.rerun()
+    else:
+        # All actions completed successfully
+        st.session_state.demo_running = False
+        st.session_state.demo_status = "Demo completed successfully."
+        st.success(st.session_state.demo_status)
+        auto = False
+        st.rerun()
+# ─── SITUATION ROOM ──────────────────────────────────────────────────────────
 st.markdown("<hr class='row-divider'>", unsafe_allow_html=True)
 st.markdown("<div class='soc-header'>Situation Room</div>", unsafe_allow_html=True)
 
@@ -947,6 +1046,7 @@ with r1c5:
     st.markdown("<div class='panel-label'>Assigned Judge</div>", unsafe_allow_html=True)
     render_judge_assignment(judge_persona)
 
+# ─── LIVING ENVIRONMENT ──────────────────────────────────────────────────────
 st.markdown("<hr class='row-divider'>", unsafe_allow_html=True)
 st.markdown("<div class='soc-header'>Living Environment</div>", unsafe_allow_html=True)
 
@@ -1015,6 +1115,7 @@ with r2c3:
         color = "#48bb78" if ticket_approved else "#8da4c0"
         st.markdown(f"<div class='kpi-block'><div class='kpi-value' style='color:{color};font-size:14px;margin-top:4px;'>{tid}</div><div class='kpi-label'>Active Ticket</div></div>", unsafe_allow_html=True)
 
+# ─── JUDGE FEED ──────────────────────────────────────────────────────────────
 st.markdown("<hr class='row-divider'>", unsafe_allow_html=True)
 st.markdown("<div class='soc-header'>Compliance Judge Feed</div>", unsafe_allow_html=True)
 
@@ -1044,6 +1145,7 @@ with r3c2:
                 unsafe_allow_html=True
             )
 
+# ─── TRAINING EVIDENCE ──────────────────────────────────────────────────────
 st.markdown("<hr class='row-divider'>", unsafe_allow_html=True)
 st.markdown("<div class='soc-header'>Training Evidence</div>", unsafe_allow_html=True)
 
@@ -1090,8 +1192,12 @@ with r4c2:
         except Exception:
             pass
 
-    auto = st.toggle("Auto Refresh (5s)", value=True)
+    # Auto-refresh toggle
+    if not st.session_state.demo_running:
+        auto = st.toggle("Auto Refresh (5s)", value=True)
+    else:
+        st.info("Demo running – auto-refresh disabled")
 
-if auto:
+if auto and not st.session_state.demo_running:
     time.sleep(REFRESH_INTERVAL)
     st.rerun()
