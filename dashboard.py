@@ -8,13 +8,16 @@ import time
 import numpy as np
 from datetime import datetime
 
+# Configure the Streamlit page
 st.set_page_config(layout="wide", page_title="Zero Trust SRE Gym", page_icon=None)
 
 # ─── CSS (with fixed heading colours) ──────────────────────────────────────
 st.markdown("""
 <style>
+/* Import fonts */
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 
+/* Global styles */
 html, body, [class*="css"] {
     font-family: 'IBM Plex Sans', sans-serif;
     background-color: #080c10;
@@ -30,6 +33,7 @@ html, body, [class*="css"] {
 
 h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
 
+/* SOC header style */
 .soc-header {
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
@@ -40,12 +44,14 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
     margin-bottom: 4px;
 }
 
+/* Dividers */
 .row-divider {
     border: none;
     border-top: 1px solid #0e1621;
     margin: 18px 0;
 }
 
+/* Panel styling */
 .panel {
     background: #0b1018;
     border: 1px solid #1a2332;
@@ -66,6 +72,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
     padding-bottom: 6px;
 }
 
+/* LEDs */
 .led-fatal {
     display: inline-block;
     width: 9px;
@@ -132,6 +139,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
     color: #4a6280;
 }
 
+/* Policy engine */
 .policy-armed {
     background: #0a1f0f;
     border: 1px solid #2f855a;
@@ -171,6 +179,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
     letter-spacing: 1px;
 }
 
+/* Workflow steps */
 .workflow-step {
     display: flex;
     align-items: center;
@@ -209,6 +218,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
     margin-bottom: 0;
 }
 
+/* CVE feed */
 .cve-box {
     background: #060d16;
     border: 1px solid #1a2332;
@@ -230,6 +240,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
     margin-bottom: 4px;
 }
 
+/* Judge card */
 .judge-card {
     background: #060d16;
     border-radius: 4px;
@@ -250,6 +261,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
     line-height: 1.5;
 }
 
+/* SIEM terminal */
 .siem-terminal {
     background: #030609;
     border: 1px solid #112236;
@@ -280,6 +292,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
     50% { opacity: 0; }
 }
 
+/* Audit trail */
 .audit-row-positive {
     display: flex;
     font-family: 'JetBrains Mono', monospace;
@@ -317,6 +330,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
 .audit-reward-neg { color: #fc8181; margin-left: auto; }
 .audit-reward-neu { color: #4a6280; margin-left: auto; }
 
+/* Judge vote log */
 .judge-vote-card {
     background: #060d16;
     border: 1px solid #1a2332;
@@ -376,6 +390,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
     border-top: 1px solid #0d1520;
 }
 
+/* KPI blocks */
 .kpi-block {
     background: #0b1018;
     border: 1px solid #1a2332;
@@ -400,6 +415,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
     margin-top: 4px;
 }
 
+/* Title styles (fixed visibility) */
 .title-main {
     font-family: 'IBM Plex Sans', sans-serif;
     font-size: 28px;
@@ -417,6 +433,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; }
     margin-top: 2px;
 }
 
+/* Button overrides */
 .stButton button {
     background: #0b1018;
     border: 1px solid #1a2332;
@@ -439,19 +456,25 @@ API_URL = os.environ.get("API_URL", "http://localhost:8000")
 REFRESH_INTERVAL = 5
 
 # ─── Session state initialisation ──────────────────────────────────────────
+# Store the judge vote log across reruns
 if "judge_vote_log" not in st.session_state:
     st.session_state.judge_vote_log = []
+# Store persona approval stats
 if "persona_stats" not in st.session_state:
-    st.session_state.persona_stats = {"junior": {"approved": 0, "rejected": 0}, "senior": {"approved": 0, "rejected": 0}, "principal": {"approved": 0, "rejected": 0}}
+    st.session_state.persona_stats = {
+        "junior": {"approved": 0, "rejected": 0},
+        "senior": {"approved": 0, "rejected": 0},
+        "principal": {"approved": 0, "rejected": 0}
+    }
 if "last_ticket_action" not in st.session_state:
     st.session_state.last_ticket_action = ""
 if "episode_results" not in st.session_state:
     st.session_state.episode_results = []
 
-# Demo state
+# Demo state variables – control the interactive demo
 if "demo_running" not in st.session_state:
     st.session_state.demo_running = False
-    st.session_state.demo_step = 0
+    st.session_state.demo_mode = None          # "golden" or "violation"
     st.session_state.demo_actions = []
     st.session_state.demo_status = ""
     st.session_state.demo_index = 0
@@ -463,7 +486,7 @@ if "demo_running" not in st.session_state:
 def fetch(endpoint):
     """Fetch data from the FastAPI backend with a timeout."""
     try:
-        r = requests.get(f"{API_URL}/{endpoint}", timeout=10)   # increased from 3
+        r = requests.get(f"{API_URL}/{endpoint}", timeout=10)
         if r.status_code == 200:
             return r.json(), True
     except Exception:
@@ -471,6 +494,7 @@ def fetch(endpoint):
     return {}, False
 
 def build_graph(nodes):
+    """Build the dependency graph for the topology visualization."""
     G = nx.DiGraph()
     for n in nodes:
         G.add_node(n)
@@ -487,6 +511,7 @@ def build_graph(nodes):
     return G
 
 def draw_topology(nodes_state):
+    """Render the service topology using Plotly."""
     if not nodes_state:
         return go.Figure()
     nodes = list(nodes_state.keys())
@@ -566,6 +591,7 @@ def draw_topology(nodes_state):
     return fig
 
 def draw_reward_curve(history):
+    """Plot the cumulative reward over episodes."""
     if not history:
         fig = go.Figure()
         fig.update_layout(
@@ -616,6 +642,7 @@ def draw_reward_curve(history):
     return fig
 
 def draw_persona_chart(persona_stats):
+    """Bar chart showing approval/rejection counts per judge persona."""
     personas = ["junior", "senior", "principal"]
     approved = [persona_stats[p]["approved"] for p in personas]
     rejected = [persona_stats[p]["rejected"] for p in personas]
@@ -641,6 +668,7 @@ def draw_persona_chart(persona_stats):
     return fig
 
 def led_for_status(status):
+    """Return HTML for the status LED."""
     if status == "compromised":
         return "<span class='led-fatal'></span>"
     if status == "isolated":
@@ -650,6 +678,7 @@ def led_for_status(status):
     return "<span class='led-warning'></span>"
 
 def render_alert_leds(nodes_state, alerts):
+    """Render the node status LEDs with alert badges."""
     node_severity = {}
     for a in alerts:
         n = a.get("target_node", "")
@@ -675,6 +704,7 @@ def render_alert_leds(nodes_state, alerts):
     st.markdown("".join(html_parts), unsafe_allow_html=True)
 
 def render_policy_status(command_output):
+    """Render the Zero Trust policy engine status."""
     is_blocked = "ACCESS DENIED" in command_output or "POLICY BLOCK" in command_output or "ROGUE" in command_output.upper()
     if is_blocked:
         last_rule = ""
@@ -700,6 +730,7 @@ def render_policy_status(command_output):
         )
 
 def render_ticket_workflow(active_ticket_id, ticket_approved, command_output):
+    """Show the ITIL workflow progress."""
     investigated = "SIEM ALERT" in command_output or "query_siem" in command_output.lower() or "STATUS: COMPROMISED" in command_output
     ticket_filed = active_ticket_id is not None
     approved = ticket_approved
@@ -720,6 +751,7 @@ def render_ticket_workflow(active_ticket_id, ticket_approved, command_output):
     st.markdown("".join(parts), unsafe_allow_html=True)
 
 def render_cve_feed(cve_context):
+    """Display live CVE threat intelligence."""
     if not cve_context or cve_context == "N/A":
         st.markdown("<div class='cve-box'><span style='color:#2d4a6e;'>Awaiting adversarial designer...</span></div>", unsafe_allow_html=True)
         return
@@ -741,6 +773,7 @@ def render_cve_feed(cve_context):
     )
 
 def render_judge_assignment(judge_persona):
+    """Show the assigned judge persona."""
     persona_descriptions = {
         "junior":    ("JUNIOR SRE", "#d69e2e", "Lenient evaluation. Rewards investigative effort. Approves on partial evidence.", "#1a1400"),
         "senior":    ("SENIOR SRE", "#3d7ab5", "Standard enterprise threshold. Requires specific IPs and IAM role names.", "#0a1520"),
@@ -756,6 +789,7 @@ def render_judge_assignment(judge_persona):
     )
 
 def render_siem_terminal(command_output):
+    """Render the SIEM terminal output."""
     display = command_output if command_output else "Awaiting agent action..."
     safe = display.replace("<", "&lt;").replace(">", "&gt;")
     st.markdown(
@@ -764,6 +798,7 @@ def render_siem_terminal(command_output):
     )
 
 def render_audit_trail(history):
+    """Show the agent's audit trail."""
     if not history:
         st.markdown("<div style='font-family:JetBrains Mono;font-size:10px;color:#2d4a6e;padding:8px;'>No actions recorded.</div>", unsafe_allow_html=True)
         return
@@ -795,6 +830,7 @@ def render_audit_trail(history):
     st.markdown("".join(rows_html), unsafe_allow_html=True)
 
 def update_judge_vote_log(history, command_output, judge_persona, active_ticket_id):
+    """Update the judge vote log based on the latest ticket action."""
     if not history:
         return
     last = history[-1] if history else {}
@@ -823,6 +859,7 @@ def update_judge_vote_log(history, command_output, judge_persona, active_ticket_
                     st.session_state.persona_stats[judge_persona]["rejected"] += 1
 
 def render_judge_vote_log():
+    """Display the judge vote log."""
     if not st.session_state.judge_vote_log:
         st.markdown("<div style='font-family:JetBrains Mono;font-size:10px;color:#2d4a6e;padding:8px;'>No ticket evaluations yet.</div>", unsafe_allow_html=True)
         return
@@ -849,9 +886,9 @@ def render_judge_vote_log():
         )
 
 def compute_kpis(history):
+    """Compute key performance indicators from the episode history."""
     if not history:
         return {"success_rate": 0.0, "violation_rate": 0.0, "avg_steps": 0.0, "valid_json": 0.0, "avg_reward": 0.0}
-    violation_actions = ["isolate_node"]
     violations = sum(1 for h in history if h.get("reward", 0) <= -15)
     total = len(history)
     positive = sum(1 for h in history if h.get("reward", 0) > 5)
@@ -864,12 +901,13 @@ def compute_kpis(history):
 
 # ─── Main render ────────────────────────────────────────────────────────────
 
-# Fetch initial data
+# Fetch initial data from the backend
 state, ok1 = fetch("state")
 history_data, ok2 = fetch("history")
 services, ok3 = fetch("services")
 history = history_data.get("history", []) if ok2 else []
 
+# Extract state variables
 command_output = state.get("command_output", "")
 active_ticket_id = state.get("active_ticket_id")
 ticket_approved = state.get("ticket_approved", False)
@@ -882,12 +920,13 @@ global_uptime = state.get("global_uptime", 100.0)
 episode_reward = state.get("episode_reward", 0.0)
 difficulty = curriculum.get("difficulty", "warmup").upper()
 
+# Update the judge vote log if there is history
 if history:
     update_judge_vote_log(history, command_output, judge_persona, active_ticket_id)
 
-# ─── Header with demo button ──────────────────────────────────────────────
+# ─── Header with two demo buttons ──────────────────────────────────────────
 st.markdown('<div style="margin-top: 3rem;">', unsafe_allow_html=True)
-col_title, col_btn = st.columns([3, 1])
+col_title, col_btns = st.columns([2.5, 1.5])
 with col_title:
     st.markdown(
         f"""
@@ -901,51 +940,82 @@ with col_title:
         """,
         unsafe_allow_html=True
     )
-with col_btn:
+with col_btns:
     if not st.session_state.demo_running:
-        if st.button("Run Live Demo", type="primary", use_container_width=True):
-            st.session_state.demo_running = True
-            st.session_state.demo_step = 0
-            st.session_state.demo_actions = []
-            st.session_state.demo_status = "Starting demo..."
-            st.session_state.demo_index = 0
-            st.session_state.compromised_node = None
-            st.session_state.ticket_id = None
-            st.rerun()   # use st.rerun() (not experimental)
+        # Show two demo buttons when no demo is running
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🏆 Golden Path", type="primary", use_container_width=True):
+                # Start the golden path demo
+                st.session_state.demo_running = True
+                st.session_state.demo_mode = "golden"
+                st.session_state.demo_actions = []
+                st.session_state.demo_status = "Starting golden path demo..."
+                st.session_state.demo_index = 0
+                st.session_state.compromised_node = None
+                st.session_state.ticket_id = None
+                st.rerun()
+        with col2:
+            if st.button("⛔ Policy Violation", type="secondary", use_container_width=True):
+                # Start the policy violation demo
+                st.session_state.demo_running = True
+                st.session_state.demo_mode = "violation"
+                st.session_state.demo_actions = []
+                st.session_state.demo_status = "Starting policy violation demo..."
+                st.session_state.demo_index = 0
+                st.session_state.compromised_node = None
+                st.session_state.ticket_id = None
+                st.rerun()
     else:
-        st.button("Demo in progress...", disabled=True, use_container_width=True)
+        # Show the demo progress when running
+        st.button(f"⏳ Demo in progress... ({st.session_state.demo_mode})", disabled=True, use_container_width=True)
         st.caption(st.session_state.demo_status)
 st.markdown('</div>', unsafe_allow_html=True)
 
+# If the backend is unreachable, show an error and stop
 if not ok1:
     st.error(f"Environment server unreachable. Please check that the backend is running at {API_URL}.")
     st.stop()
 
-# ─── Demo execution (if running) ──────────────────────────────────────────
-auto = True  # default, will be overridden if demo running
+# ─── Demo execution ─────────────────────────────────────────────────────────
+# The auto-refresh flag – disabled during demo
+auto = True
 
 if st.session_state.demo_running:
-    auto = False  # disable auto-refresh during demo
+    auto = False  # disable auto-refresh while demo runs
 
+    # If no actions are defined, we need to initialise the demo sequence
     if not st.session_state.demo_actions:
         try:
-            # Reset the environment
+            # Reset the environment first
             requests.post(f"{API_URL}/reset", json={"task_id": "auto"}, timeout=20)
         except requests.exceptions.RequestException as e:
             st.error(f"Could not reach the backend at {API_URL}. Please make sure the FastAPI server is running.\nError: {e}")
             st.session_state.demo_running = False
             st.stop()
 
-        # Build the initial query actions (no hardcoded assumption)
-        st.session_state.demo_actions = [
-            {"tool": "query_siem_logs", "node": "hr_db"},
-            {"tool": "query_siem_logs", "node": "payment"},
-            {"tool": "query_siem_logs", "node": "frontend"},
-        ]
-        st.session_state.demo_index = 0
-        st.session_state.compromised_node = None
-        st.session_state.ticket_id = None
+        # Build the action sequence based on the demo mode
+        if st.session_state.demo_mode == "golden":
+            # Golden path: investigate all three internal nodes, then file ticket, approve, isolate
+            st.session_state.demo_actions = [
+                {"tool": "query_siem_logs", "node": "hr_db"},
+                {"tool": "query_siem_logs", "node": "payment"},
+                {"tool": "query_siem_logs", "node": "frontend"},
+            ]
+            st.session_state.demo_index = 0
+            st.session_state.compromised_node = None
+            st.session_state.ticket_id = None
+        elif st.session_state.demo_mode == "violation":
+            # Violation: immediately isolate a node without any ticket
+            # Pick a node that has a FATAL alert (if any) or use a default
+            fatal_nodes = [a["target_node"] for a in alerts if a["severity"] == "FATAL"]
+            target = fatal_nodes[0] if fatal_nodes else "frontend"
+            st.session_state.demo_actions = [
+                {"tool": "isolate_node", "node": target}
+            ]
+            st.session_state.demo_index = 0
 
+    # Execute the next action in the sequence
     idx = st.session_state.demo_index
     actions = st.session_state.demo_actions
 
@@ -953,16 +1023,16 @@ if st.session_state.demo_running:
         action = actions[idx]
         st.session_state.demo_status = f"Executing: {action['tool']} on {action.get('node', 'N/A')}"
 
-        # Build the payload for this step
+        # Build the payload for the step
         payload = {
             "tool_name": action["tool"],
             "payload": {"node": action.get("node", "")},
             "justification": action.get("justification", f"Demo step {idx+1}")
         }
+        # For check_approval, we need the ticket_id
         if action["tool"] == "check_approval" and "ticket_id" in action:
             payload["payload"]["ticket_id"] = action["ticket_id"]
 
-        # Execute the step with error handling
         try:
             resp = requests.post(f"{API_URL}/step", json=payload, timeout=20)
             if resp.status_code == 200:
@@ -970,23 +1040,37 @@ if st.session_state.demo_running:
                 obs = data["observation"]
                 reward = data["reward"]["value"]
 
-                # Detect compromised node
-                if action["tool"] == "query_siem_logs" and reward > 5:
-                    st.session_state.compromised_node = action["node"]
-                    extra = [
-                        {"tool": "file_ticket", "node": action["node"], "justification": f"SIEM evidence confirms compromise on {action['node']}"},
-                        {"tool": "check_approval", "ticket_id": "pending"},
-                        {"tool": "isolate_node", "node": action["node"]}
-                    ]
-                    st.session_state.demo_actions.extend(extra)
+                # Golden path logic: detect the compromised node from positive SIEM query
+                if st.session_state.demo_mode == "golden":
+                    if action["tool"] == "query_siem_logs" and reward > 5:
+                        # Found the compromised node – add the rest of the workflow
+                        st.session_state.compromised_node = action["node"]
+                        siem_out = obs.get("command_output", "")
+                        # Extract IP and role from SIEM (simplified dynamic extraction)
+                        ip = "10.0.5.42" if "10.0.5.42" in siem_out else "10.0.3.17" if "10.0.3.17" in siem_out else "10.0.7.88"
+                        role = "hr-reader-svc" if "hr-reader-svc" in siem_out else "payment-processor-svc" if "payment-processor-svc" in siem_out else "frontend-webapp-svc"
+                        justification = (
+                            f"SIEM confirms active threat on {action['node']}. "
+                            f"Unauthorized IAM role assumption from IP {ip} with role {role}. "
+                            f"Outbound data transfer detected. This matches the FATAL alert."
+                        )
+                        extra = [
+                            {"tool": "file_ticket", "node": action["node"], "justification": justification},
+                            {"tool": "check_approval", "ticket_id": "pending"},
+                            {"tool": "isolate_node", "node": action["node"]}
+                        ]
+                        st.session_state.demo_actions.extend(extra)
 
-                # Capture ticket ID after filing
-                if action["tool"] == "file_ticket" and obs.get("active_ticket_id"):
-                    st.session_state.ticket_id = obs["active_ticket_id"]
-                    for i, a in enumerate(st.session_state.demo_actions):
-                        if a["tool"] == "check_approval":
-                            st.session_state.demo_actions[i]["ticket_id"] = st.session_state.ticket_id
-                            break
+                    # Capture the ticket ID after filing
+                    if action["tool"] == "file_ticket" and obs.get("active_ticket_id"):
+                        st.session_state.ticket_id = obs["active_ticket_id"]
+                        for i, a in enumerate(st.session_state.demo_actions):
+                            if a["tool"] == "check_approval":
+                                st.session_state.demo_actions[i]["ticket_id"] = st.session_state.ticket_id
+                                break
+
+                # For violation, we just let the policy engine block it – no extra logic
+
             else:
                 st.error(f"API returned status {resp.status_code}: {resp.text}")
                 st.session_state.demo_running = False
@@ -1005,13 +1089,18 @@ if st.session_state.demo_running:
             st.session_state.demo_running = False
             st.stop()
 
+        # Advance to the next action and refresh the page to update the UI
         st.session_state.demo_index += 1
-        st.rerun()   # refresh to update all panels
+        st.rerun()
     else:
-        # Demo finished
+        # All actions have been executed – the demo is complete
         st.session_state.demo_running = False
-        st.session_state.demo_status = "Demo completed successfully."
-        st.success(st.session_state.demo_status)
+        if st.session_state.demo_mode == "golden":
+            st.session_state.demo_status = "Golden Path Demo completed successfully!"
+            st.success("🎉 Golden Path Demo completed successfully! The agent followed the correct Zero Trust workflow.")
+        elif st.session_state.demo_mode == "violation":
+            st.session_state.demo_status = "Policy Violation Demo completed."
+            st.warning("⚠️ Policy Violation Demo completed. The agent attempted isolation without approval and was blocked by the Zero Trust Policy Engine.")
         auto = False
         st.rerun()
 
@@ -1179,20 +1268,29 @@ with r4c2:
         )
 
     st.markdown("<div class='panel-label' style='margin-top:14px;'>Controls</div>", unsafe_allow_html=True)
+    # Reset Environment button – clears session state and resets the backend
     if st.button("Reset Environment"):
         try:
+            # Call the reset endpoint to clear the environment state
             requests.post(f"{API_URL}/reset", json={"task_id": "auto"}, timeout=5)
+            # Clear the local judge vote log and cache
             st.session_state.judge_vote_log = []
             st.cache_data.clear()
-        except Exception:
-            pass
+            # If a demo is running, stop it
+            st.session_state.demo_running = False
+            st.success("Environment reset successfully.")
+            # Force a rerun to update the UI with the fresh state
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to reset environment: {e}")
 
-    # Auto-refresh toggle
+    # Auto-refresh toggle – disabled during demo
     if not st.session_state.demo_running:
         auto = st.toggle("Auto Refresh (5s)", value=True)
     else:
         st.info("Demo running – auto-refresh disabled")
 
+# Auto-refresh loop (only when auto is True and demo not running)
 if auto and not st.session_state.demo_running:
     time.sleep(REFRESH_INTERVAL)
     st.rerun()
