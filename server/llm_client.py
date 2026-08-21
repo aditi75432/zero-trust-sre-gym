@@ -8,12 +8,13 @@ import json
 from groq import Groq
 
 # Default model – can be overridden by environment variable GROQ_MODEL
-DEFAULT_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+DEFAULT_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 
 _client = None
 
 
 def get_client() -> Groq:
+    """Lazy-initialise the Groq client with the API key."""
     global _client
     if _client is None:
         api_key = os.environ.get("GROQ_API_KEY")
@@ -30,9 +31,12 @@ def call_llm(
     prompt: str,
     model: str = None,
     temperature: float = 0.3,
-    max_tokens: int = 512,
+    max_tokens: int = 1024,   # Increased to avoid truncation
     system: str = None
 ) -> str:
+    """
+    Call the Groq LLM with a user prompt.
+    """
     if model is None:
         model = DEFAULT_MODEL
 
@@ -59,27 +63,33 @@ def call_llm_json(
     temperature: float = 0.2,
     fallback: dict = None
 ) -> dict:
+    """
+    Call the LLM and parse the response as JSON.
+    Tries multiple extraction strategies to be robust against markdown and extra text.
+    """
     if model is None:
         model = DEFAULT_MODEL
 
     raw = call_llm(prompt, model=model, temperature=temperature)
     
-    # Strip markdown code fences
+    # 1. Remove markdown code fences
     cleaned = re.sub(r'```(?:json)?', '', raw).strip().rstrip('`').strip()
     
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-    
-    match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}', cleaned, re.DOTALL)
+    # 2. Try to find a JSON object with balanced braces (handles nested objects up to 2 levels)
+    #    This pattern is sufficient for our simple scenario structures.
+    match = re.search(r'(\{(?:[^{}]|(?:\{[^{}]*\}))*\})', cleaned, re.DOTALL)
     if match:
+        candidate = match.group(1)
         try:
-            return json.loads(match.group())
+            return json.loads(candidate)
         except json.JSONDecodeError:
-            pass
+            pass  # fall through to other strategies
     
+    # 3. If fallback is provided, return it (helps keep the system running)
     if fallback is not None:
         return fallback
     
-    raise ValueError(f"Could not parse LLM response as JSON.\nRaw response: {raw[:300]}")
+    # 4. If all else fails, raise an error
+    raise ValueError(
+        f"Could not parse LLM response as JSON.\nRaw response: {raw[:300]}"
+    )

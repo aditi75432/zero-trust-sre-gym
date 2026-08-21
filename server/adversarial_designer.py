@@ -10,6 +10,7 @@ FALLBACK_MODELS = [
 ]
 
 def fetch_live_threat_intel() -> str:
+    """Fetch the latest high-severity CVE from the public API."""
     url = "https://cve.circl.lu/api/last"
     for attempt in range(3):
         try:
@@ -23,12 +24,14 @@ def fetch_live_threat_intel() -> str:
         except Exception as e:
             print(f"[ThreatIntel] Attempt {attempt+1} failed: {e}")
         time.sleep(2)
+    # Fallback hardcoded CVE if the API fails
     return "Real Threat Intel: CVE-2024-3400 (Palo Alto PAN-OS Command Injection allowing unauthenticated RCE)."
 
 ALL_NODES = ["api_gateway", "auth_service", "frontend", "payment", "hr_db"]
 INTERNAL_NODES = ["frontend", "payment", "hr_db"]
 GATEWAY_NODES = ["api_gateway", "auth_service"]
 
+# Static fallback scenarios when LLM generation fails
 _STATIC_WARMUP = [
     {
         "compromised_nodes": ["hr_db"],
@@ -82,6 +85,10 @@ _STATIC_ADVANCED = [
 
 
 def generate_scenario(weakness_profile: dict, difficulty: str = "intermediate") -> dict:
+    """
+    Generate an adversarial scenario, using LLM if available, otherwise static pool.
+    Returns a dict with compromised_nodes, threat_ips, iam_roles, etc.
+    """
     try:
         scenario = _llm_generate(weakness_profile, difficulty)
         if scenario.get("compromised_nodes") and scenario.get("threat_ips"):
@@ -92,6 +99,9 @@ def generate_scenario(weakness_profile: dict, difficulty: str = "intermediate") 
 
 
 def _llm_generate(weakness_profile: dict, difficulty: str) -> dict:
+    """
+    Ask the LLM to design a scenario based on live CVE data and agent weaknesses.
+    """
     top_weaknesses = sorted(weakness_profile.items(), key=lambda x: x[1], reverse=True)[:2]
     weakness_focus = ", ".join(f"{k} (failure rate: {v:.0%})" for k, v in top_weaknesses) or "any threat type"
     
@@ -116,8 +126,8 @@ You MUST base the SIEM evidence on this exact live vulnerability:
 
 Translate the mechanics of that specific CVE into realistic Datadog/Splunk SIEM logs for the compromised node.
 
-Respond ONLY with valid JSON, no surrounding text:
-{{
+IMPORTANT: Return ONLY a valid JSON object. No markdown, no explanations, no code fences.
+The JSON must have these exact keys:
   "compromised_nodes": ["node1"],
   "threat_type": "data_exfiltration",
   "threat_ips": ["10.0.x.x"],
@@ -125,7 +135,8 @@ Respond ONLY with valid JSON, no surrounding text:
   "red_herring_nodes": ["node"],
   "siem_evidence_template": "Log evidence matching the CVE mechanics. Use {{ip}} and {{role}}.",
   "difficulty_description": "One sentence describing the CVE and attack vector"
-}}"""
+
+JSON:"""
 
     # Try each model in order until one works
     last_error = None
@@ -135,6 +146,16 @@ Respond ONLY with valid JSON, no surrounding text:
                 prompt,
                 temperature=0.7,
                 model=model,
+                # Provide a fallback to avoid crashing if parsing fails
+                fallback={
+                    "compromised_nodes": ["frontend"],
+                    "threat_type": "data_exfiltration",
+                    "threat_ips": ["10.0.2.45"],
+                    "iam_roles": ["frontend-service-role"],
+                    "red_herring_nodes": ["api_gateway", "auth_service"],
+                    "siem_evidence_template": "Suspicious outbound traffic from frontend. Source IP {ip}, role {role}.",
+                    "difficulty_description": "Data exfiltration from frontend service"
+                }
             )
             scenario["cve_context"] = live_cve_context
             return scenario
@@ -147,12 +168,16 @@ Respond ONLY with valid JSON, no surrounding text:
 
 
 def _static_pick(difficulty: str) -> dict:
+    """Pick a static scenario based on difficulty."""
     if difficulty in ["advanced", "expert"]:
         return random.choice(_STATIC_ADVANCED)
     return random.choice(_STATIC_WARMUP)
 
 
 def _normalize(raw: dict, difficulty: str = "unknown") -> dict:
+    """
+    Ensure the scenario has valid nodes, IPs, roles, etc.
+    """
     raw_nodes = raw.get("compromised_nodes", ["hr_db"])
     valid_nodes = [n for n in raw_nodes if n in INTERNAL_NODES]
     if not valid_nodes:

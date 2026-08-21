@@ -996,24 +996,42 @@ if st.session_state.demo_running:
 
         # Build the action sequence based on the demo mode
         if st.session_state.demo_mode == "golden":
-            # Golden path: investigate all three internal nodes, then file ticket, approve, isolate
-            st.session_state.demo_actions = [
-                {"tool": "query_siem_logs", "node": "hr_db"},
-                {"tool": "query_siem_logs", "node": "payment"},
-                {"tool": "query_siem_logs", "node": "frontend"},
-            ]
-            st.session_state.demo_index = 0
-            st.session_state.compromised_node = None
-            st.session_state.ticket_id = None
+            # --- GOLDEN PATH: dynamically fetch FATAL alerts to decide which nodes to investigate ---
+            try:
+                # Get the current state after reset to see active alerts
+                state_resp = requests.get(f"{API_URL}/state", timeout=5)
+                state_data = state_resp.json() if state_resp.status_code == 200 else {}
+                fatal_nodes = [a["target_node"] for a in state_data.get("active_alerts", []) if a.get("severity") == "FATAL"]
+                # If no FATAL alerts, fall back to all internal nodes
+                if not fatal_nodes:
+                    fatal_nodes = ["frontend", "payment", "hr_db"]
+                # Build a query action for each fatal node (order doesn't matter, we'll stop at first positive)
+                actions = [{"tool": "query_siem_logs", "node": node} for node in fatal_nodes]
+                st.session_state.demo_actions = actions
+                st.session_state.demo_index = 0
+                st.session_state.compromised_node = None
+                st.session_state.ticket_id = None
+                st.session_state.demo_status = f"Investigating {len(fatal_nodes)} potential threat nodes..."
+            except Exception as e:
+                st.error(f"Failed to fetch initial state for demo: {e}")
+                st.session_state.demo_running = False
+                st.stop()
+
         elif st.session_state.demo_mode == "violation":
             # Violation: immediately isolate a node without any ticket
             # Pick a node that has a FATAL alert (if any) or use a default
-            fatal_nodes = [a["target_node"] for a in alerts if a["severity"] == "FATAL"]
-            target = fatal_nodes[0] if fatal_nodes else "frontend"
+            try:
+                state_resp = requests.get(f"{API_URL}/state", timeout=5)
+                state_data = state_resp.json() if state_resp.status_code == 200 else {}
+                fatal_nodes = [a["target_node"] for a in state_data.get("active_alerts", []) if a.get("severity") == "FATAL"]
+                target = fatal_nodes[0] if fatal_nodes else "frontend"
+            except Exception:
+                target = "frontend"
             st.session_state.demo_actions = [
                 {"tool": "isolate_node", "node": target}
             ]
             st.session_state.demo_index = 0
+            st.session_state.demo_status = f"Attempting unauthorised isolation on {target}..."
 
     # Execute the next action in the sequence
     idx = st.session_state.demo_index
@@ -1047,19 +1065,24 @@ if st.session_state.demo_running:
                         st.session_state.compromised_node = action["node"]
                         siem_out = obs.get("command_output", "")
                         # Extract IP and role from SIEM (simplified dynamic extraction)
+                        # We can try to extract from the SIEM output; fallback to generic values
                         ip = "10.0.5.42" if "10.0.5.42" in siem_out else "10.0.3.17" if "10.0.3.17" in siem_out else "10.0.7.88"
                         role = "hr-reader-svc" if "hr-reader-svc" in siem_out else "payment-processor-svc" if "payment-processor-svc" in siem_out else "frontend-webapp-svc"
+                        # Build a justification using actual SIEM evidence
                         justification = (
                             f"SIEM confirms active threat on {action['node']}. "
                             f"Unauthorized IAM role assumption from IP {ip} with role {role}. "
-                            f"Outbound data transfer detected. This matches the FATAL alert."
+                            f"Outbound data transfer detected. This matches the FATAL alert.\n\n"
+                            f"SIEM Evidence: {siem_out[:200]}"
                         )
+                        # Append the remaining workflow steps
                         extra = [
                             {"tool": "file_ticket", "node": action["node"], "justification": justification},
                             {"tool": "check_approval", "ticket_id": "pending"},
                             {"tool": "isolate_node", "node": action["node"]}
                         ]
                         st.session_state.demo_actions.extend(extra)
+                        st.session_state.demo_status = f"✅ Found compromised node: {action['node']}. Proceeding to file ticket."
 
                     # Capture the ticket ID after filing
                     if action["tool"] == "file_ticket" and obs.get("active_ticket_id"):
@@ -1068,6 +1091,7 @@ if st.session_state.demo_running:
                             if a["tool"] == "check_approval":
                                 st.session_state.demo_actions[i]["ticket_id"] = st.session_state.ticket_id
                                 break
+                        st.session_state.demo_status = f"✅ Ticket {st.session_state.ticket_id} filed. Checking approval..."
 
                 # For violation, we just let the policy engine block it – no extra logic
 
