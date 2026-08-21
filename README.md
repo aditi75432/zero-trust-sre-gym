@@ -19,7 +19,7 @@ tags:
 
 **Policy-Bounded Reinforcement Learning for Autonomous Cyber Resilience**
 
-[Live Environment](https://aditi75432-zero-trust-safe-SRE-gym.hf.space) | [Training Notebook (Colab)](https://colab.research.google.com/drive/1Y_zqkxElx8H0zt8_AnR3vqf93NBT5ncy?usp=sharing) | [HuggingFace Blog Post](HF_Blog.md) | [GitHub Repository](https://github.com/aditi75432/zero-trust-sre-gym)
+[Live Environment](https://aditi75432-zero-trust-safe-SRE-gym.hf.space) | [Training Notebook (Colab)](https://colab.research.google.com/drive/1Y_zqkxElx8H0zt8_AnR3vqf93NBT5ncy?usp=sharing) | [HuggingFace Blog Post](HF_Blog.md) | [GitHub Repository](https://github.com/aditi75432/zero-trust-sre-gym) | [Demo](https://www.youtube.com/watch?v=lyQQhUOWM0U)
 
 ---
 
@@ -587,6 +587,7 @@ All links are public and tested.
 | Training Notebook (Colab) | https://colab.research.google.com/drive/1Y_zqkxElx8H0zt8_AnR3vqf93NBT5ncy?usp=sharing |
 | HuggingFace Blog Post | HF_Blog.md |
 | Code Repository | https://github.com/aditi75432/zero-trust-sre-gym |
+| Demo | https://www.youtube.com/watch?v=lyQQhUOWM0U |
 
 All training plots (graph_1_side_by_side.png, graph_2_overlay_raw.png, graph_3_overlay_normalized.png, reward_curve_normalized.png) embedded above. 
 
