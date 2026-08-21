@@ -1062,32 +1062,35 @@ if st.session_state.demo_running:
                 # Golden path logic: detect the compromised node from positive SIEM query
                 if st.session_state.demo_mode == "golden":
                     if action["tool"] == "query_siem_logs" and reward > 5:
-                        # Found the compromised node – add the rest of the workflow
+                        # Found the compromised node – replace remaining actions with workflow steps
                         st.session_state.compromised_node = action["node"]
                         siem_out = obs.get("command_output", "")
                         # Extract IP and role from SIEM (simplified dynamic extraction)
-                        # We can try to extract from the SIEM output; fallback to generic values
                         ip = "10.0.5.42" if "10.0.5.42" in siem_out else "10.0.3.17" if "10.0.3.17" in siem_out else "10.0.7.88"
                         role = "hr-reader-svc" if "hr-reader-svc" in siem_out else "payment-processor-svc" if "payment-processor-svc" in siem_out else "frontend-webapp-svc"
-                        # Build a justification using actual SIEM evidence
                         justification = (
                             f"SIEM confirms active threat on {action['node']}. "
                             f"Unauthorized IAM role assumption from IP {ip} with role {role}. "
                             f"Outbound data transfer detected. This matches the FATAL alert.\n\n"
                             f"SIEM Evidence: {siem_out[:200]}"
                         )
-                        # Append the remaining workflow steps
-                        extra = [
+                        # The workflow steps to execute next (file, check, isolate)
+                        workflow_actions = [
                             {"tool": "file_ticket", "node": action["node"], "justification": justification},
                             {"tool": "check_approval", "ticket_id": "pending"},
                             {"tool": "isolate_node", "node": action["node"]}
                         ]
-                        st.session_state.demo_actions.extend(extra)
+                        # Replace actions with the workflow, and reset index to 0 so we start from file_ticket
+                        st.session_state.demo_actions = workflow_actions
+                        st.session_state.demo_index = 0
                         st.session_state.demo_status = f"✅ Found compromised node: {action['node']}. Proceeding to file ticket."
+                        # After replacing, we need to re-run the loop to execute the new first action
+                        st.rerun()
 
                     # Capture the ticket ID after filing
                     if action["tool"] == "file_ticket" and obs.get("active_ticket_id"):
                         st.session_state.ticket_id = obs["active_ticket_id"]
+                        # Update the check_approval action with the real ticket ID
                         for i, a in enumerate(st.session_state.demo_actions):
                             if a["tool"] == "check_approval":
                                 st.session_state.demo_actions[i]["ticket_id"] = st.session_state.ticket_id
@@ -1114,18 +1117,23 @@ if st.session_state.demo_running:
             st.session_state.demo_running = False
             st.stop()
 
-        # Advance to the next action and refresh the page to update the UI
+        # Advance to the next action (only if we didn't replace the actions above)
+        # But if we replaced, we already called st.rerun() and won't reach this.
         st.session_state.demo_index += 1
         st.rerun()
     else:
-        # All actions have been executed – the demo is complete
-        st.session_state.demo_running = False
-        if st.session_state.demo_mode == "golden":
-            st.session_state.demo_status = "Golden Path Demo completed successfully!"
-            st.success("🎉 Golden Path Demo completed successfully! The agent followed the correct Zero Trust workflow.")
-        elif st.session_state.demo_mode == "violation":
-            st.session_state.demo_status = "Policy Violation Demo completed."
-            st.warning("⚠️ Policy Violation Demo completed. The agent attempted isolation without approval and was blocked by the Zero Trust Policy Engine.")
+        # All actions have been executed – check if we found a compromised node
+        if st.session_state.compromised_node is None:
+            st.session_state.demo_running = False
+            st.error("❌ Golden Path demo failed: No compromised node was found after querying all FATAL alerts.")
+        else:
+            st.session_state.demo_running = False
+            if st.session_state.demo_mode == "golden":
+                st.session_state.demo_status = "Golden Path Demo completed successfully!"
+                st.success("🎉 Golden Path Demo completed successfully! The agent followed the correct Zero Trust workflow.")
+            elif st.session_state.demo_mode == "violation":
+                st.session_state.demo_status = "Policy Violation Demo completed."
+                st.warning("⚠️ Policy Violation Demo completed. The agent attempted isolation without approval and was blocked by the Zero Trust Policy Engine.")
         auto = False
         st.rerun()
 
