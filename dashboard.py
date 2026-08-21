@@ -987,8 +987,9 @@ if st.session_state.demo_running:
     # If no actions are defined, we need to initialise the demo sequence
     if not st.session_state.demo_actions:
         try:
-            # Reset the environment first
-            requests.post(f"{API_URL}/reset", json={"task_id": "auto"}, timeout=20)
+            # Reset the environment first – increased timeout to 60 seconds
+            # because the environment may take a while to generate a scenario (LLM calls)
+            requests.post(f"{API_URL}/reset", json={"task_id": "auto"}, timeout=60)
         except requests.exceptions.RequestException as e:
             st.error(f"Could not reach the backend at {API_URL}. Please make sure the FastAPI server is running.\nError: {e}")
             st.session_state.demo_running = False
@@ -999,7 +1000,7 @@ if st.session_state.demo_running:
             # --- GOLDEN PATH: dynamically fetch FATAL alerts to decide which nodes to investigate ---
             try:
                 # Get the current state after reset to see active alerts
-                state_resp = requests.get(f"{API_URL}/state", timeout=5)
+                state_resp = requests.get(f"{API_URL}/state", timeout=10)
                 state_data = state_resp.json() if state_resp.status_code == 200 else {}
                 fatal_nodes = [a["target_node"] for a in state_data.get("active_alerts", []) if a.get("severity") == "FATAL"]
                 # If no FATAL alerts, fall back to all internal nodes
@@ -1021,7 +1022,7 @@ if st.session_state.demo_running:
             # Violation: immediately isolate a node without any ticket
             # Pick a node that has a FATAL alert (if any) or use a default
             try:
-                state_resp = requests.get(f"{API_URL}/state", timeout=5)
+                state_resp = requests.get(f"{API_URL}/state", timeout=10)
                 state_data = state_resp.json() if state_resp.status_code == 200 else {}
                 fatal_nodes = [a["target_node"] for a in state_data.get("active_alerts", []) if a.get("severity") == "FATAL"]
                 target = fatal_nodes[0] if fatal_nodes else "frontend"
@@ -1162,7 +1163,8 @@ r2c1, r2c2, r2c3 = st.columns([1.6, 1.8, 1.6])
 
 with r2c1:
     st.markdown("<div class='panel-label'>Service Topology</div>", unsafe_allow_html=True)
-    st.plotly_chart(draw_topology(nodes_state), use_container_width=True, config={"displayModeBar": False})
+    # Replace use_container_width with width='stretch'
+    st.plotly_chart(draw_topology(nodes_state), width='stretch', config={"displayModeBar": False})
 
     st.markdown("<div class='panel-label' style='margin-top:8px;'>Microservice Health</div>", unsafe_allow_html=True)
     if ok3:
@@ -1235,7 +1237,8 @@ with r3c1:
 
 with r3c2:
     st.markdown("<div class='panel-label'>Approval Rate by Persona</div>", unsafe_allow_html=True)
-    st.plotly_chart(draw_persona_chart(st.session_state.persona_stats), use_container_width=True, config={"displayModeBar": False})
+    # Replace use_container_width with width='stretch'
+    st.plotly_chart(draw_persona_chart(st.session_state.persona_stats), width='stretch', config={"displayModeBar": False})
 
     mastery = curriculum.get("mastery", {})
     if mastery:
@@ -1261,7 +1264,8 @@ r4c1, r4c2 = st.columns([2, 1])
 
 with r4c1:
     st.markdown("<div class='panel-label'>Reward Trajectory (Rolling Mean + Policy Floor)</div>", unsafe_allow_html=True)
-    st.plotly_chart(draw_reward_curve(history), use_container_width=True, config={"displayModeBar": False})
+    # Replace use_container_width with width='stretch'
+    st.plotly_chart(draw_reward_curve(history), width='stretch', config={"displayModeBar": False})
 
 with r4c2:
     st.markdown("<div class='panel-label'>Session Performance</div>", unsafe_allow_html=True)
@@ -1295,8 +1299,8 @@ with r4c2:
     # Reset Environment button – clears session state and resets the backend
     if st.button("Reset Environment"):
         try:
-            # Call the reset endpoint to clear the environment state
-            requests.post(f"{API_URL}/reset", json={"task_id": "auto"}, timeout=5)
+            # Call the reset endpoint to clear the environment state – increased timeout
+            requests.post(f"{API_URL}/reset", json={"task_id": "auto"}, timeout=60)
             # Clear the local judge vote log and cache
             st.session_state.judge_vote_log = []
             st.cache_data.clear()
