@@ -22,6 +22,21 @@ tags:
 [Live Environment](https://aditi75432-zero-trust-safe-SRE-gym.hf.space) | [Training Notebook (Colab)](https://colab.research.google.com/drive/1Y_zqkxElx8H0zt8_AnR3vqf93NBT5ncy?usp=sharing) | [HuggingFace Blog Post](HF_Blog.md) | [GitHub Repository](https://github.com/aditi75432/zero-trust-sre-gym) | [Demo](https://www.youtube.com/watch?v=lyQQhUOWM0U)
 
 ---
+## Why this matters for Razorpay
+
+This project was originally built for the Meta PyTorch OpenEnv Hackathon, but the idea behind it goes beyond cybersecurity. The same approach can apply to any system where an AI agent is allowed to take high impact actions.
+
+At Razorpay, that could mean actions like issuing a refund, releasing a payout, or changing a merchant's settlement configuration. In each case, the agent needs to follow the same three principles:
+
+* **Explainable:** the agent must have clear evidence for why the action is necessary.
+* **Bounded:** a hard policy layer must be able to block the action when it is not allowed. In this project, `policy_engine.py` enforces that at the system level rather than relying on the model to follow a prompt.
+* **Gated:** the action cannot go through until the required approval is received through `check_approval`.
+
+Every step is also recorded in the audit trail. When something goes wrong, such as isolating the wrong service and causing dependent services to degrade, the system does not hide the failure. It identifies the cause, records what happened, and penalizes the action.
+
+That is the same principle Razorpay calls for in agentic commerce: **every money action should be explainable, bounded, and gated.** This project demonstrates that pattern in a live, adversarial environment where the cost of acting incorrectly is made explicit. 
+
+---
 
 ## At a Glance
 
@@ -645,5 +660,4 @@ Full training runs via the Colab notebook linked above.
 
 ---
 
-Built for the Meta-PyTorch OpenEnv Hackathon, India 2026.
-Aditi Mehta
+Built by Aditi Mehta, 2026
